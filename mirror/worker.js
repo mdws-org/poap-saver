@@ -27,6 +27,19 @@ const CORS = {
 
 const MAX_BYTES = 15 * 1024 * 1024;
 
+/* Hard spend cap. R2 storage is $0.015/GB-month and the only unbounded cost
+ * dimension, so the mirror refuses new ingests past this total: 180 GiB is
+ * about $2.70/month. The counter is a small ledger object updated after each
+ * ingest; concurrent ingests can undercount briefly, which the headroom in
+ * the cap absorbs. */
+const CAP_BYTES = 180 * 1024 * 1024 * 1024;
+
+async function usage(env) {
+    const o = await env.MIRROR.get('_usage');
+    if (!o) return { bytes: 0, objects: 0 };
+    try { return await o.json(); } catch { return { bytes: 0, objects: 0 }; }
+}
+
 function json(status, obj) {
     return new Response(JSON.stringify(obj, null, 2), {
         status,
@@ -47,12 +60,34 @@ export default {
         }
 
         if (url.pathname === '/' || url.pathname === '') {
+            const u = await usage(env);
             return json(200, {
                 what: 'poap-mirror: community availability cache for POAP event artwork',
                 keys: 'GET /img/<eventId>; POST /ingest/<eventId> with x-source-url (assets.poap.xyz only)',
                 writes: env.WRITES_OPEN === '1' ? 'open' : 'locked',
+                events: u.objects,
+                bytes: u.bytes,
+                cap_bytes: CAP_BYTES,
                 source: 'https://github.com/mdws-org/poap-saver',
             });
+        }
+
+        /* Ops: rebuild the usage ledger from an actual bucket listing.
+           Guarded by a deploy-time secret so only the operator can run it. */
+        if (url.pathname === '/recount' && req.method === 'POST') {
+            if (!env.ADMIN_KEY || req.headers.get('x-admin-key') !== env.ADMIN_KEY) {
+                return json(403, { error: 'admin only' });
+            }
+            let bytes = 0, objects = 0, cursor;
+            do {
+                const page = await env.MIRROR.list({ cursor, limit: 1000 });
+                for (const o of page.objects) {
+                    if (o.key.startsWith('img/')) { bytes += o.size; objects += 1; }
+                }
+                cursor = page.truncated ? page.cursor : undefined;
+            } while (cursor);
+            await env.MIRROR.put('_usage', JSON.stringify({ bytes, objects }));
+            return json(200, { ok: true, bytes, objects });
         }
 
         const img = url.pathname.match(/^\/img\/(\d{1,12})$/);
@@ -80,6 +115,10 @@ export default {
             if (await env.MIRROR.head(key)) {
                 return json(200, { ok: true, note: 'already mirrored' });
             }
+            const u = await usage(env);
+            if (u.bytes >= CAP_BYTES) {
+                return json(507, { error: 'mirror is at its storage cap' });
+            }
             const src = req.headers.get('x-source-url') || '';
             if (!src.startsWith('https://assets.poap.xyz/')) {
                 return json(400, { error: 'x-source-url must be an assets.poap.xyz URL' });
@@ -99,6 +138,9 @@ export default {
                 },
                 customMetadata: { sha256: sha, source: src, ingested: String(Date.now()) },
             });
+            u.bytes += buf.byteLength;
+            u.objects += 1;
+            await env.MIRROR.put('_usage', JSON.stringify(u));
             return json(201, { ok: true, event: ing[1], sha256: sha, bytes: buf.byteLength });
         }
 
