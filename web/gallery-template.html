@@ -31,7 +31,7 @@ dialog h2{color:var(--accent);font-size:1.1rem;margin:0 0 8px;text-align:center}
 .prov{margin-top:14px;border-top:1px solid var(--rule);padding-top:12px;font-size:.75rem;overflow-wrap:anywhere}
 .prov div{margin:3px 0}
 .prov b{font-weight:600}
-.dead{text-decoration:line-through;opacity:.7}
+.dead{opacity:.7}
 .close{float:right;background:none;border:0;color:var(--ink);font-size:1.3rem;line-height:1;cursor:pointer}
 footer{max-width:1080px;margin:0 auto;padding:0 20px 40px;font-size:.8rem;color:var(--soft)}
 footer a{color:inherit}
@@ -103,8 +103,8 @@ grid.addEventListener('click', function(e){
     '<h2>'+esc(p.n)+'</h2><div class="desc">'+esc(p.d)+'</div>'+
     '<div class="prov">'+
     '<div><b>chain</b> '+esc(p.c)+' &middot; <b>token</b> '+esc(p.t)+' &middot; <b>event</b> '+esc(p.e==null?'?':p.e)+'</div>'+
-    '<div><b>token URI (offline)</b> <span class="dead">'+esc(p.uri)+'</span></div>'+
-    '<div><b>original image URL (offline)</b> <span class="dead">'+esc(p.src)+'</span></div>'+
+    '<div><b>token URI (POAP-hosted)</b> <span class="dead">'+esc(p.uri)+'</span></div>'+
+    '<div><b>original image URL (POAP-hosted)</b> <span class="dead">'+esc(p.src)+'</span></div>'+
     '<div><b>image sha256</b> '+esc(p.sha||'n/a')+'</div>'+
     '<div><a href="'+scan+'" target="_blank" rel="noopener">view token on chain</a></div></div>';
   dlg.querySelector('#x').addEventListener('click', function(){ dlg.close(); });
