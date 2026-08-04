@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POAP archive — __ADDRESS__</title>
+<style>
+:root{--bg:#000;--ink:#a3a3a3;--soft:#737373;--title:#d4d4d4;--rule:#27272a;--accent:#fff}
+@media (prefers-color-scheme: light){:root{--bg:#fff;--ink:#52525b;--soft:#71717a;--title:#3f3f46;--rule:#e4e4e7;--accent:#000}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;line-height:1.55}
+header,main{max-width:1080px;margin:0 auto;padding:0 20px}
+header{padding-top:36px}
+h1{color:var(--accent);font-size:1.6rem;margin:0 0 6px}
+.meta{font-size:.85rem;color:var(--soft);word-break:break-all}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:22px}
+.controls input{background:transparent;border:1px solid var(--rule);color:var(--ink);padding:9px 13px;font:inherit;width:220px}
+.chip{background:transparent;border:1px solid var(--rule);color:var(--ink);padding:7px 13px;font:inherit;font-size:.85rem;cursor:pointer}
+.chip.on{color:var(--accent);border-color:var(--ink)}
+.count{font-size:.8rem;color:var(--soft);margin:12px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin:14px 0 60px}
+.card{background:transparent;border:1px solid var(--rule);padding:12px;cursor:pointer;text-align:center;color:inherit;font:inherit;display:block;width:100%}
+.card img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--bg)}
+.card .n{font-size:.8rem;margin:8px 0 2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .y{font-size:.72rem;color:var(--soft)}
+dialog{background:var(--bg);color:var(--ink);border:1px solid var(--rule);max-width:560px;width:92vw;padding:22px}
+dialog::backdrop{background:rgba(0,0,0,.75)}
+dialog img{width:min(300px,70vw);display:block;margin:0 auto 14px}
+dialog h2{color:var(--accent);font-size:1.1rem;margin:0 0 8px;text-align:center}
+.desc{font-size:.88rem;white-space:pre-wrap}
+.prov{margin-top:14px;border-top:1px solid var(--rule);padding-top:12px;font-size:.75rem;word-break:break-all}
+.prov div{margin:3px 0}
+.prov b{font-weight:600}
+.dead{text-decoration:line-through;opacity:.7}
+.close{float:right;background:none;border:0;color:var(--ink);font-size:1.3rem;line-height:1;cursor:pointer}
+footer{max-width:1080px;margin:0 auto;padding:0 20px 40px;font-size:.8rem;color:var(--soft)}
+footer a{color:inherit}
+</style>
+</head>
+<body>
+<header>
+<h1>POAP archive</h1>
+<p class="meta">__COUNT__ badges held by __ADDRESS__ &middot; saved from POAP's
+servers with the SHA-256 of every image as it was served. The tokens stay on
+chain; this folder is the part that would have been lost.</p>
+<div class="controls">
+<input id="q" type="search" placeholder="Search badges" aria-label="Search badges">
+<span id="years"></span>
+</div>
+<p id="count" class="count"></p>
+</header>
+<main><div class="grid" id="grid"></div></main>
+<dialog id="dlg"></dialog>
+<footer><p>Archived with <a href="https://github.com/mdws-org/poap-saver">poap-saver</a>.
+Keep this folder together: the page reads the images beside it.</p></footer>
+<script>
+var DATA = __DATA__;
+var grid = document.getElementById('grid');
+var q = document.getElementById('q');
+var yearsEl = document.getElementById('years');
+var countEl = document.getElementById('count');
+var dlg = document.getElementById('dlg');
+var year = null;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+var years = [];
+DATA.forEach(function(p){ if(p.y && years.indexOf(p.y)===-1) years.push(p.y); });
+years.sort(function(a,b){return b-a;});
+yearsEl.innerHTML = years.map(function(y){return '<button class="chip" data-y="'+y+'">'+y+'</button>';}).join(' ');
+yearsEl.addEventListener('click', function(e){
+  var b = e.target.closest('.chip'); if(!b) return;
+  var y = Number(b.dataset.y);
+  year = year===y ? null : y;
+  Array.prototype.forEach.call(yearsEl.children, function(c){ c.classList.toggle('on', Number(c.dataset.y)===year); });
+  render();
+});
+q.addEventListener('input', render);
+
+function render(){
+  var term = q.value.toLowerCase();
+  var html = '', n = 0;
+  DATA.forEach(function(p,i){
+    if(year && p.y!==year) return;
+    if(term && (p.n+' '+p.d).toLowerCase().indexOf(term)===-1) return;
+    n++;
+    html += '<button class="card" type="button" data-i="'+i+'">'+
+      (p.img ? '<img loading="lazy" src="'+esc(p.img)+'" alt="'+esc(p.n)+'">' : '')+
+      '<div class="n">'+esc(p.n)+'</div>'+
+      '<div class="y">'+esc(p.y||'')+'</div></button>';
+  });
+  grid.innerHTML = html;
+  countEl.textContent = n===DATA.length ? n+' badges' : n+' of '+DATA.length+' badges';
+}
+
+grid.addEventListener('click', function(e){
+  var card = e.target.closest('.card'); if(!card) return;
+  var p = DATA[Number(card.dataset.i)];
+  var host = p.c==='gnosis' ? 'https://gnosisscan.io' : 'https://etherscan.io';
+  var scan = host+'/nft/0x22c1f6050e56d2876009903609a2cc3fef83b415/'+p.t;
+  dlg.innerHTML = '<button class="close" id="x" type="button" aria-label="Close">&times;</button>'+
+    (p.img ? '<img src="'+esc(p.img)+'" alt="'+esc(p.n)+'">' : '')+
+    '<h2>'+esc(p.n)+'</h2><div class="desc">'+esc(p.d)+'</div>'+
+    '<div class="prov">'+
+    '<div><b>chain</b> '+esc(p.c)+' &middot; <b>token</b> '+esc(p.t)+' &middot; <b>event</b> '+esc(p.e==null?'?':p.e)+'</div>'+
+    '<div><b>token URI (offline)</b> <span class="dead">'+esc(p.uri)+'</span></div>'+
+    '<div><b>original image URL (offline)</b> <span class="dead">'+esc(p.src)+'</span></div>'+
+    '<div><b>image sha256</b> '+esc(p.sha||'n/a')+'</div>'+
+    '<div><a href="'+scan+'" target="_blank" rel="noopener">view token on chain</a></div></div>';
+  dlg.querySelector('#x').addEventListener('click', function(){ dlg.close(); });
+  dlg.showModal();
+});
+dlg.addEventListener('click', function(e){ if(e.target===dlg) dlg.close(); });
+
+render();
+</script>
+</body>
+</html>

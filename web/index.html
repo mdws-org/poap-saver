@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POAP Saver</title>
+<meta name="description" content="Save the metadata and artwork your POAP badges point at. Runs entirely in your browser; nothing is uploaded.">
+<style>
+:root{--bg:#000;--ink:#a3a3a3;--soft:#737373;--title:#d4d4d4;--rule:#27272a;--accent:#fff}
+@media (prefers-color-scheme: light){:root{--bg:#fff;--ink:#52525b;--soft:#71717a;--title:#3f3f46;--rule:#e4e4e7;--accent:#000}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;line-height:1.6}
+main{max-width:680px;margin:0 auto;padding:48px 20px}
+h1{color:var(--accent);font-size:1.7rem;margin:0 0 10px}
+p{margin:0 0 14px}
+form{display:flex;gap:8px;flex-wrap:wrap;margin:26px 0 8px}
+input{flex:1 1 260px;background:transparent;border:1px solid var(--rule);color:var(--ink);padding:11px 13px;font:inherit}
+button{background:transparent;border:1px solid var(--ink);color:var(--accent);padding:11px 18px;font:inherit;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+#status{min-height:1.5em;color:var(--title)}
+#log{font-size:.8rem;color:var(--soft);padding-left:18px}
+#result a{color:var(--accent)}
+.fine{font-size:.8rem;color:var(--soft);border-top:1px solid var(--rule);margin-top:34px;padding-top:14px}
+.fine a{color:inherit}
+</style>
+</head>
+<body>
+<main>
+<h1>POAP Saver</h1>
+<p>POAP shut down in August 2026. Your badges are permanent tokens on Gnosis
+Chain, but their names, descriptions, and artwork live on POAP's servers, and
+the pointer written into each token cannot be changed. When those servers go
+dark, that layer is gone.</p>
+<p>This page saves it while they still answer. Enter an address or ENS name;
+your browser fetches every badge's metadata and artwork directly, records a
+SHA-256 of each image, and gives you one zip: the archive plus a gallery page
+that works offline, forever. Nothing is uploaded, and no wallet connection is
+ever asked for — an address is all it needs.</p>
+<form id="rescue-form">
+<input id="address" type="text" placeholder="0x… or name.eth" aria-label="Address or ENS name" autocomplete="off" spellcheck="false">
+<button id="go" type="submit">Save my POAPs</button>
+</form>
+<p id="status"></p>
+<ul id="log"></ul>
+<p id="result"></p>
+<p class="fine">Runs entirely in your browser against public RPC endpoints and
+POAP's own hosts. Large collections take a few minutes and are held in memory
+until the zip downloads. Source and a command-line version:
+<a href="https://github.com/mdws-org/poap-saver">github.com/mdws-org/poap-saver</a>.</p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

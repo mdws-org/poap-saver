@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>zip writer test</title>
+<div id="rescue-form"></div><input id="address"><button id="go"></button>
+<p id="status"></p><ul id="log"></ul><p id="result"></p>
+<pre id="out"></pre>
+<script src="../web/app.js"></script>
+<script>
+(function(){
+  var ps = window.__poapSaver;
+  var enc = new TextEncoder();
+  var files = [
+    {name:'poap-archive-test/index.html', data:enc.encode('<!doctype html><p>hi</p>')},
+    {name:'poap-archive-test/gnosis/123/metadata.json', data:enc.encode('{"name":"tést"}')},
+    {name:'poap-archive-test/gnosis/123/image.png', data:new Uint8Array([137,80,78,71,13,10,26,10,0,1,2,3])},
+  ];
+  var blob = ps.makeZip(files);
+  var checks = [
+    'keccak-empty:' + (ps.hex(ps.keccak256(new Uint8Array(0)))==='c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470'?'PASS':'FAIL'),
+    'crc32-abc:' + (ps.crc32(enc.encode('abc')).toString(16)==='352441c2'?'PASS':'FAIL'),
+  ];
+  blob.arrayBuffer().then(function(buf){
+    var b = new Uint8Array(buf), s='';
+    for (var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
+    document.getElementById('out').textContent = checks.join(' ') + '|ZIP64:' + btoa(s);
+  });
+})();
+</script>
