@@ -227,11 +227,11 @@ def _drop(scheme, host):
         pass
 
 
-def fetch(url, binary=False, _depth=0):
+def fetch(url, binary=False, _depth=0, tries=3):
     p = urllib.parse.urlparse(url)
     path = p.path + ("?" + p.query if p.query else "")
     last = None
-    for attempt in range(3):
+    for attempt in range(tries):
         try:
             c = _conn(p.scheme, p.netloc)
             c.request("GET", path, headers={"User-Agent": UA, "Accept": "*/*",
@@ -245,7 +245,7 @@ def fetch(url, binary=False, _depth=0):
                     if _depth >= 5:
                         raise RuntimeError("too many redirects")
                     return fetch(urllib.parse.urljoin(url, loc), binary,
-                                 _depth + 1)
+                                 _depth + 1, tries)
             if r.status == 429 or r.status >= 500:
                 _drop(p.scheme, p.netloc)
                 time.sleep(10 * (attempt + 1))
@@ -257,7 +257,8 @@ def fetch(url, binary=False, _depth=0):
         except Exception as e:  # noqa: BLE001
             last = e
             _drop(p.scheme, p.netloc)
-            time.sleep(2 * (attempt + 1))
+            if attempt + 1 < tries:
+                time.sleep(2 * (attempt + 1))
     raise last
 
 
@@ -270,20 +271,26 @@ def _write_atomic(path, data):
 
 
 # -------------------------------------------------------------------- rescue
-def _offer_to_mirror(event_id, src):
-    """Best-effort: ask the mirror to ingest this event from POAP's origin."""
+def _offer_to_mirror(event_id, src, token_uri):
+    """Best-effort: ask the mirror to ingest this event from POAP's origin.
+
+    The mirror re-fetches and verifies against POAP's own metadata, so we send
+    only the two URLs. Failures are ignored: contributing is a courtesy, never
+    a requirement, and it must never slow down or break a rescue.
+    """
+    p = urllib.parse.urlparse(MIRROR)
     try:
-        p = urllib.parse.urlparse(MIRROR)
         c = _conn(p.scheme, p.netloc)
         c.request("POST", f"/ingest/{event_id}",
                   headers={"User-Agent": UA, "x-source-url": src,
-                           "Connection": "keep-alive"})
+                           "x-token-uri": token_uri, "Connection": "keep-alive"})
         c.getresponse().read()
     except Exception:  # noqa: BLE001 - contribution is optional by design
         _drop(p.scheme, p.netloc)
 
 
-def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
+def archive_token(outdir, chain, wallet, token_id, uri, stats, failures,
+                  use_mirror=True):
     tdir = os.path.join(outdir, chain, str(token_id))
     meta_path = os.path.join(tdir, "metadata.json")
     os.makedirs(tdir, exist_ok=True)
@@ -339,19 +346,20 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
             stats["img_cached"] += 1
         else:
             blob = ctype = None
-            if event_id:
+            if use_mirror and event_id:
                 try:
-                    blob, ctype = fetch(f"{MIRROR}/img/{event_id}", binary=True)
+                    blob, ctype = fetch(f"{MIRROR}/img/{event_id}",
+                                        binary=True, tries=1)
                     img_source = "mirror"
-                    stats["img_mirror"] += 1
                 except Exception:  # noqa: BLE001 - fall through to origin
                     blob = None
             try:
                 if blob is None:
                     blob, ctype = fetch(img_url, binary=True)
                     img_source = "origin"
-                    if event_id and img_url.startswith("https://assets.poap.xyz/"):
-                        _offer_to_mirror(event_id, img_url)
+                    if (use_mirror and event_id
+                            and img_url.startswith("https://assets.poap.xyz/")):
+                        _offer_to_mirror(event_id, img_url, uri)
                 ext = (mimetypes.guess_extension(ctype.split(";")[0].strip())
                        or os.path.splitext(urllib.parse.urlparse(img_url).path)[1]
                        or ".bin")
@@ -362,6 +370,8 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
                 _write_atomic(side, hashlib.sha256(blob).hexdigest()
                               + "  " + img_file + "\n")
                 stats["img_new"] += 1
+                if img_source == "mirror":
+                    stats["img_mirror"] += 1
                 time.sleep(0.25)
             except Exception as e:  # noqa: BLE001
                 log(f"    !! image {token_id}: {e}")
@@ -394,6 +404,7 @@ def cmd_rescue(args):
     outdir = args.out or f"poap-archive-{target[2:10].lower()}"
     os.makedirs(outdir, exist_ok=True)
 
+    use_mirror = not getattr(args, "no_mirror", False)
     stats = dict(meta_new=0, meta_cached=0, meta_fail=0,
                  img_new=0, img_cached=0, img_fail=0, img_mirror=0)
     rows = []
@@ -412,7 +423,7 @@ def cmd_rescue(args):
                 failures.append(f"{chain}/{token_id}: empty tokenURI")
                 continue
             r = archive_token(outdir, chain, target, token_id, uri, stats,
-                              failures)
+                              failures, use_mirror=use_mirror)
             if r:
                 rows.append(r)
             if n % 25 == 0:
@@ -507,6 +518,9 @@ def main():
     r = sub.add_parser("rescue", help="archive every POAP an address holds")
     r.add_argument("address", help="0x address or ENS name")
     r.add_argument("--out", help="archive directory (default: poap-archive-<addr>)")
+    r.add_argument("--no-mirror", action="store_true",
+                   help="do not read from or contribute to the community "
+                        "mirror; fetch everything from POAP directly")
     r.set_defaults(fn=cmd_rescue)
     s = sub.add_parser("site", help="write a gallery index.html into an archive")
     s.add_argument("archive", help="archive directory from rescue")

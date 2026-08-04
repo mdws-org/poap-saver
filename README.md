@@ -73,16 +73,29 @@ person who archived it.
 
 ## The mirror
 
-The tool reads from and contributes to a community mirror of POAP event
-artwork at `poap-mirror.bemeadows.workers.dev` (an R2 bucket; the Worker is in
-[`mirror/`](mirror/)). The mirror never accepts uploaded bytes: an ingest
-request names an event, the Worker fetches that event's artwork from POAP's
-own origin, hashes what it received, and stores it immutably with the hash and
-source URL. So the mirror can only contain what POAP actually served, and
-every rescue that runs while POAP's hosts answer extends what survives after
-they stop. When the origin dies, the mirror locks read-only. If the mirror is
-unreachable, the tool falls back to POAP directly — it is an availability
-layer, never a requirement.
+There is a community mirror of POAP event artwork at
+`poap-mirror.bemeadows.workers.dev` (an R2 bucket; the Worker is in
+[`mirror/`](mirror/), MIT like the rest). Every rescue that reaches it while
+POAP still answers extends what survives after POAP stops.
+
+**In the browser it is off unless you turn it on**, because using it tells the
+mirror which events an address holds. Unchecked, the page talks to nobody but
+POAP and a public Gnosis node. **On the command line it is on by default**;
+pass `--no-mirror` to fetch everything from POAP directly.
+
+The mirror never accepts uploaded bytes. An ingest request names an event and
+two POAP URLs; the Worker reads POAP's own metadata to confirm the artwork
+really belongs to that event, fetches the image from POAP's origin, checks it
+is actually an image, hashes it, and stores it immutably with the hash and
+source URL. So the mirror can only hold what POAP served, filed under the
+event POAP itself says it belongs to. When the origin dies the mirror locks
+read-only, and if it is ever unreachable the tool falls back to POAP — it is
+an availability layer, never a requirement.
+
+Everything in it is verifiable and copyable: [`registry/events.json`](registry/)
+lists every mirrored event with its SHA-256, size, source URL and IPFS CID, so
+anyone can check an object byte-for-byte or pin the same content themselves
+without asking anyone's permission.
 
 ## What this cannot save
 

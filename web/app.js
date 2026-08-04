@@ -283,6 +283,11 @@
     }
 
     /* ---------------------------------------------------------- rescue -- */
+    function mirrorOn() {
+        var el = document.getElementById('use-mirror');
+        return Boolean(el && el.checked);
+    }
+
     var ui = {
         form: document.getElementById('rescue-form'),
         input: document.getElementById('address'),
@@ -346,18 +351,23 @@
             };
             rows.push(row);
             if (!imgUrl) return null;
-            var viaMirror = eventId
+            var useMirror = mirrorOn();
+            var viaMirror = (useMirror && eventId)
                 ? fetch(MIRROR + '/img/' + eventId).then(function (r) {
                       if (!r.ok) throw new Error('miss');
                       return r;
                   })
-                : Promise.reject(new Error('no event id'));
+                : Promise.reject(new Error('mirror off'));
             return viaMirror.catch(function () {
                 return fetchWithRetry(imgUrl, 3).then(function (r) {
-                    if (eventId && imgUrl.indexOf('https://assets.poap.xyz/') === 0) {
+                    if (useMirror && eventId
+                            && imgUrl.indexOf('https://assets.poap.xyz/') === 0) {
                         fetch(MIRROR + '/ingest/' + eventId, {
                             method: 'POST',
-                            headers: { 'x-source-url': imgUrl },
+                            headers: {
+                                'x-source-url': imgUrl,
+                                'x-token-uri': tok.uri,
+                            },
                         }).catch(function () {});
                     }
                     return r;

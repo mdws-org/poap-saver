@@ -20,6 +20,8 @@ button:disabled{opacity:.5;cursor:wait}
 #status{min-height:1.5em;color:var(--title)}
 #log{font-size:.8rem;color:var(--soft);padding-left:18px}
 #result a{color:var(--accent)}
+.mirror-opt{display:flex;gap:8px;align-items:flex-start;font-size:.8rem;color:var(--soft);margin:0 0 14px;max-width:60ch}
+.mirror-opt input{margin:.2rem 0 0}
 #preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:20px}
 #preview .pv{margin:0;border:1px solid var(--rule);padding:8px}
 #preview img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--bg)}
@@ -40,10 +42,16 @@ your browser fetches every badge's metadata and artwork directly, records a
 SHA-256 of each image, and gives you one zip: the archive plus a gallery page
 that works offline, forever. Nothing is uploaded, and no wallet connection is
 ever asked for — an address is all it needs.</p>
+<p>By default the page talks to nobody but POAP and a public Gnosis node. The
+community mirror below is optional and off unless you turn it on.</p>
 <form id="rescue-form">
 <input id="address" type="text" placeholder="0x… or name.eth" aria-label="Address or ENS name" autocomplete="off" spellcheck="false">
 <button id="go" type="submit">Save my POAPs</button>
 </form>
+<label class="mirror-opt"><input type="checkbox" id="use-mirror">
+Also use the community mirror. Faster, and it keeps working for events other
+people already saved after POAP's servers go away - but it tells the mirror
+which events this address holds.</label>
 <p id="status"></p>
 <ul id="log"></ul>
 <p id="result"></p>
