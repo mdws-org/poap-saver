@@ -136,7 +136,16 @@ def rpc_batch(chain, calls, to=POAP_CONTRACT):
                 if isinstance(out, dict):
                     raise RuntimeError(out.get("error", out))
                 by_id = {o["id"]: o.get("result") for o in out}
-                return [by_id.get(i) for i in range(len(calls))]
+                results = [by_id.get(i) for i in range(len(calls))]
+                # A missing/None sub-result is a per-call error (rate limit,
+                # node lag). Decoding it as zero would silently drop badges,
+                # so treat it as an endpoint failure and move on.
+                if any(r is None for r in results):
+                    errs = [o.get("error") for o in out if o.get("error")]
+                    raise RuntimeError(
+                        f"{sum(1 for r in results if r is None)}/{len(calls)}"
+                        f" calls failed: {errs[:1]}")
+                return results
             except Exception as e:  # noqa: BLE001 - try the next endpoint
                 last_err = e
                 time.sleep(1.5 * (attempt + 1))
@@ -196,26 +205,29 @@ def enumerate_tokens(chain, addr):
 _CONNS = {}
 
 
-def _conn(host):
-    if host not in _CONNS:
-        _CONNS[host] = http.client.HTTPSConnection(host, timeout=45)
-    return _CONNS[host]
+def _conn(scheme, host):
+    key = (scheme, host)
+    if key not in _CONNS:
+        cls = (http.client.HTTPConnection if scheme == "http"
+               else http.client.HTTPSConnection)
+        _CONNS[key] = cls(host, timeout=45)
+    return _CONNS[key]
 
 
-def _drop(host):
+def _drop(scheme, host):
     try:
-        _CONNS.pop(host).close()
+        _CONNS.pop((scheme, host)).close()
     except Exception:  # noqa: BLE001
         pass
 
 
-def fetch(url, binary=False):
+def fetch(url, binary=False, _depth=0):
     p = urllib.parse.urlparse(url)
     path = p.path + ("?" + p.query if p.query else "")
     last = None
     for attempt in range(3):
         try:
-            c = _conn(p.netloc)
+            c = _conn(p.scheme, p.netloc)
             c.request("GET", path, headers={"User-Agent": UA, "Accept": "*/*",
                                             "Connection": "keep-alive"})
             r = c.getresponse()
@@ -224,9 +236,12 @@ def fetch(url, binary=False):
             if r.status in (301, 302, 303, 307, 308):
                 loc = r.headers.get("location")
                 if loc:
-                    return fetch(urllib.parse.urljoin(url, loc), binary)
+                    if _depth >= 5:
+                        raise RuntimeError("too many redirects")
+                    return fetch(urllib.parse.urljoin(url, loc), binary,
+                                 _depth + 1)
             if r.status == 429 or r.status >= 500:
-                _drop(p.netloc)
+                _drop(p.scheme, p.netloc)
                 time.sleep(10 * (attempt + 1))
                 last = RuntimeError(f"HTTP {r.status}")
                 continue
@@ -235,31 +250,46 @@ def fetch(url, binary=False):
             return (data, ctype) if binary else (json.loads(data), ctype)
         except Exception as e:  # noqa: BLE001
             last = e
-            _drop(p.netloc)
+            _drop(p.scheme, p.netloc)
             time.sleep(2 * (attempt + 1))
     raise last
 
 
+def _write_atomic(path, data):
+    tmp = path + ".tmp"
+    mode = "wb" if isinstance(data, bytes) else "w"
+    with open(tmp, mode) as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
 # -------------------------------------------------------------------- rescue
-def archive_token(outdir, chain, wallet, token_id, uri, stats):
+def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
     tdir = os.path.join(outdir, chain, str(token_id))
     meta_path = os.path.join(tdir, "metadata.json")
     os.makedirs(tdir, exist_ok=True)
 
+    meta = None
     if os.path.exists(meta_path):
-        meta = json.load(open(meta_path))
-        stats["meta_cached"] += 1
-    else:
+        # A crash mid-write leaves a truncated file; treat it as absent
+        # rather than wedging every later run.
+        try:
+            meta = json.load(open(meta_path))
+            stats["meta_cached"] += 1
+        except (json.JSONDecodeError, OSError):
+            meta = None
+    if meta is None:
         try:
             meta, _ = fetch(uri)
         except Exception as e:  # noqa: BLE001
             log(f"    !! metadata {token_id}: {e}")
             stats["meta_fail"] += 1
+            failures.append(f"{chain}/{token_id}: metadata: {e}")
             return None
         meta["_archived_from"] = uri
         meta["_archived_ts"] = int(time.time())
-        with open(meta_path, "w") as f:
-            json.dump(meta, f, indent=2, ensure_ascii=False)
+        _write_atomic(meta_path,
+                      json.dumps(meta, indent=2, ensure_ascii=False))
         stats["meta_new"] += 1
         time.sleep(0.25)
 
@@ -269,9 +299,11 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats):
         side = os.path.join(tdir, "image.sha256")
         cached = None
         for f_ in os.listdir(tdir):
-            if f_.startswith("image.") and not f_.endswith(".sha256"):
+            if f_.startswith("image.") and not f_.endswith(".sha256") \
+                    and not f_.endswith(".tmp"):
                 if os.path.exists(side):
-                    want = open(side).read().split()[0]
+                    parts = open(side).read().split()
+                    want = parts[0] if parts else None
                     got = hashlib.sha256(
                         open(os.path.join(tdir, f_), "rb").read()).hexdigest()
                     if want == got:
@@ -289,15 +321,15 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats):
                 if ext == ".jpe":
                     ext = ".jpg"
                 img_file = "image" + ext
-                with open(os.path.join(tdir, img_file), "wb") as f:
-                    f.write(blob)
-                with open(side, "w") as f:
-                    f.write(hashlib.sha256(blob).hexdigest() + "  " + img_file + "\n")
+                _write_atomic(os.path.join(tdir, img_file), blob)
+                _write_atomic(side, hashlib.sha256(blob).hexdigest()
+                              + "  " + img_file + "\n")
                 stats["img_new"] += 1
                 time.sleep(0.25)
             except Exception as e:  # noqa: BLE001
                 log(f"    !! image {token_id}: {e}")
                 stats["img_fail"] += 1
+                failures.append(f"{chain}/{token_id}: image: {e}")
 
     event_id = None
     parts = (uri or "").rstrip("/").split("/")
@@ -315,7 +347,14 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats):
 
 def cmd_rescue(args):
     target = args.address
-    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", target):
+    if re.fullmatch(r"0[xX][0-9a-fA-F]{40}", target):
+        target = "0x" + target[2:]
+    else:
+        if not target.isascii():
+            raise SystemExit(
+                f"{target}: non-ASCII ENS names need UTS-46 normalization, "
+                "which this tool does not implement - paste the 0x address "
+                "instead")
         log(f"resolving {target} via ENS…")
         target = resolve_ens(target)
         log(f"  -> {target}")
@@ -325,28 +364,47 @@ def cmd_rescue(args):
     stats = dict(meta_new=0, meta_cached=0, meta_fail=0,
                  img_new=0, img_cached=0, img_fail=0)
     rows = []
+    failures = []
     for chain in ("gnosis", "eth"):
         log(f"[{chain}] enumerating…")
         try:
             toks = enumerate_tokens(chain, target)
         except Exception as e:  # noqa: BLE001
-            log(f"  !! {chain}: {e}")
+            log(f"  !! {chain}: enumeration FAILED: {e}")
+            failures.append(f"{chain}: enumeration: {e}")
             continue
         t0 = time.time()
         for n, (token_id, uri) in enumerate(toks, 1):
             if not uri:
+                failures.append(f"{chain}/{token_id}: empty tokenURI")
                 continue
-            r = archive_token(outdir, chain, target, token_id, uri, stats)
+            r = archive_token(outdir, chain, target, token_id, uri, stats,
+                              failures)
             if r:
                 rows.append(r)
             if n % 25 == 0:
                 rate = n / max(time.time() - t0, 1e-9) * 60
                 log(f"    {n}/{len(toks)}  ({rate:.0f}/min)")
 
-    with open(os.path.join(outdir, "manifest.json"), "w") as f:
-        json.dump({"generated": int(time.time()), "address": target,
-                   "count": len(rows), "contract": POAP_CONTRACT,
-                   "poaps": rows}, f, indent=2, ensure_ascii=False)
+    # Merge with any existing manifest so a run with one chain's RPC down
+    # cannot erase the other chain's previously archived rows.
+    merged = {}
+    mpath = os.path.join(outdir, "manifest.json")
+    if os.path.exists(mpath):
+        try:
+            for p_ in json.load(open(mpath)).get("poaps", []):
+                merged[(p_.get("chain"), str(p_.get("token_id")))] = p_
+        except (json.JSONDecodeError, OSError):
+            pass
+    for r in rows:
+        merged[(r["chain"], str(r["token_id"]))] = r
+    allrows = list(merged.values())
+    _write_atomic(mpath, json.dumps(
+        {"generated": int(time.time()), "address": target,
+         "count": len(allrows), "contract": POAP_CONTRACT,
+         "failures": failures, "poaps": allrows},
+        indent=2, ensure_ascii=False))
+    rows = allrows
 
     log(f"\nsaved {len(rows)} POAPs -> {outdir}/")
     log(f"  metadata: {stats['meta_new']} new, {stats['meta_cached']} cached, "
@@ -376,7 +434,8 @@ def cmd_site(args):
         sha = None
         side = os.path.join(outdir, p["chain"], str(p["token_id"]), "image.sha256")
         if os.path.exists(side):
-            sha = open(side).read().split()[0]
+            parts = open(side).read().split()
+            sha = parts[0] if parts else None
         rows.append({"c": p["chain"], "t": str(p["token_id"]),
                      "e": p.get("event_id"), "n": p.get("name") or "POAP",
                      "d": (p.get("description") or "").strip(),
@@ -399,10 +458,13 @@ def gallery_html(address, rows):
             break
     else:
         raise SystemExit("gallery-template.html not found")
+    # "</" must not appear inside the inline <script> block: badge metadata
+    # is third-party text and "</script>" in it would end the element.
+    data = json.dumps(rows, ensure_ascii=False,
+                      separators=(",", ":")).replace("</", "<\\/")
     return (tpl.replace("__ADDRESS__", address)
                .replace("__COUNT__", str(len(rows)))
-               .replace("__DATA__", json.dumps(rows, ensure_ascii=False,
-                                               separators=(",", ":"))))
+               .replace("__DATA__", data))
 
 
 def main():
