@@ -10,6 +10,10 @@
 
     var POAP = '0x22c1f6050e56d2876009903609a2cc3fef83b415';
     var ENS_REGISTRY = '0x00000000000c2e074ec69a0dfb2997ba6c7d2e1e';
+    /* Community mirror of POAP event artwork (mirror/ in the repo). Read
+       first, contribute after an origin fetch. Both optional by design. */
+    var MIRROR = 'https://poap-mirror.bemeadows.workers.dev';
+
     var RPCS = {
         gnosis: ['https://rpc.gnosischain.com', 'https://gnosis-rpc.publicnode.com', 'https://gnosis.drpc.org'],
         eth: ['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org'],
@@ -333,6 +337,7 @@
             files.push({ name: dir + 'metadata.json',
                          data: new TextEncoder().encode(JSON.stringify(meta, null, 2)) });
             var imgUrl = meta.image_url || meta.image;
+            var eventId = eventIdFrom(tok.uri);
             var row = {
                 c: tok.chain, t: String(tok.id), e: eventIdFrom(tok.uri),
                 n: meta.name || 'POAP', d: (meta.description || '').trim(),
@@ -341,7 +346,23 @@
             };
             rows.push(row);
             if (!imgUrl) return null;
-            return fetchWithRetry(imgUrl, 3).then(function (r) {
+            var viaMirror = eventId
+                ? fetch(MIRROR + '/img/' + eventId).then(function (r) {
+                      if (!r.ok) throw new Error('miss');
+                      return r;
+                  })
+                : Promise.reject(new Error('no event id'));
+            return viaMirror.catch(function () {
+                return fetchWithRetry(imgUrl, 3).then(function (r) {
+                    if (eventId && imgUrl.indexOf('https://assets.poap.xyz/') === 0) {
+                        fetch(MIRROR + '/ingest/' + eventId, {
+                            method: 'POST',
+                            headers: { 'x-source-url': imgUrl },
+                        }).catch(function () {});
+                    }
+                    return r;
+                });
+            }).then(function (r) {
                 var ctype = r.headers.get('content-type');
                 return r.arrayBuffer().then(function (buf) {
                     var bytes = new Uint8Array(buf);

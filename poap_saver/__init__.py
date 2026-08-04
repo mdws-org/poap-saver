@@ -38,6 +38,12 @@ RPCS = {
 }
 UA = "poap-saver/1.0 (+https://github.com/mdws-org/poap-saver)"
 
+# Community mirror of POAP event artwork (see mirror/ in the repo). Reads are
+# tried here first; after an origin fetch succeeds, the event is offered for
+# ingestion so the mirror grows with use. Either direction failing is fine —
+# the mirror is an availability layer, never a requirement.
+MIRROR = "https://poap-mirror.bemeadows.workers.dev"
+
 SEL_BALANCE = "0x70a08231"
 SEL_TOKEN_OF_OWNER = "0x2f745c59"
 SEL_TOKEN_URI = "0xc87b56dd"
@@ -264,6 +270,19 @@ def _write_atomic(path, data):
 
 
 # -------------------------------------------------------------------- rescue
+def _offer_to_mirror(event_id, src):
+    """Best-effort: ask the mirror to ingest this event from POAP's origin."""
+    try:
+        p = urllib.parse.urlparse(MIRROR)
+        c = _conn(p.scheme, p.netloc)
+        c.request("POST", f"/ingest/{event_id}",
+                  headers={"User-Agent": UA, "x-source-url": src,
+                           "Connection": "keep-alive"})
+        c.getresponse().read()
+    except Exception:  # noqa: BLE001 - contribution is optional by design
+        _drop(p.scheme, p.netloc)
+
+
 def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
     tdir = os.path.join(outdir, chain, str(token_id))
     meta_path = os.path.join(tdir, "metadata.json")
@@ -293,8 +312,14 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
         stats["meta_new"] += 1
         time.sleep(0.25)
 
+    event_id = None
+    parts = (uri or "").rstrip("/").split("/")
+    if len(parts) >= 2 and parts[-2].isdigit():
+        event_id = int(parts[-2])
+
     img_url = meta.get("image_url") or meta.get("image")
     img_file = None
+    img_source = None
     if img_url:
         side = os.path.join(tdir, "image.sha256")
         cached = None
@@ -313,8 +338,20 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
             img_file = cached
             stats["img_cached"] += 1
         else:
+            blob = ctype = None
+            if event_id:
+                try:
+                    blob, ctype = fetch(f"{MIRROR}/img/{event_id}", binary=True)
+                    img_source = "mirror"
+                    stats["img_mirror"] += 1
+                except Exception:  # noqa: BLE001 - fall through to origin
+                    blob = None
             try:
-                blob, ctype = fetch(img_url, binary=True)
+                if blob is None:
+                    blob, ctype = fetch(img_url, binary=True)
+                    img_source = "origin"
+                    if event_id and img_url.startswith("https://assets.poap.xyz/"):
+                        _offer_to_mirror(event_id, img_url)
                 ext = (mimetypes.guess_extension(ctype.split(";")[0].strip())
                        or os.path.splitext(urllib.parse.urlparse(img_url).path)[1]
                        or ".bin")
@@ -331,16 +368,12 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats, failures):
                 stats["img_fail"] += 1
                 failures.append(f"{chain}/{token_id}: image: {e}")
 
-    event_id = None
-    parts = (uri or "").rstrip("/").split("/")
-    if len(parts) >= 2 and parts[-2].isdigit():
-        event_id = int(parts[-2])
-
     return {
         "chain": chain, "wallet": wallet, "token_id": token_id,
         "event_id": event_id, "name": meta.get("name"),
         "description": meta.get("description"), "year": meta.get("year"),
-        "image_url": img_url, "image_file": img_file, "token_uri": uri,
+        "image_url": img_url, "image_file": img_file,
+        "image_source": img_source, "token_uri": uri,
         "attributes": meta.get("attributes"),
     }
 
@@ -362,7 +395,7 @@ def cmd_rescue(args):
     os.makedirs(outdir, exist_ok=True)
 
     stats = dict(meta_new=0, meta_cached=0, meta_fail=0,
-                 img_new=0, img_cached=0, img_fail=0)
+                 img_new=0, img_cached=0, img_fail=0, img_mirror=0)
     rows = []
     failures = []
     for chain in ("gnosis", "eth"):
@@ -409,8 +442,8 @@ def cmd_rescue(args):
     log(f"\nsaved {len(rows)} POAPs -> {outdir}/")
     log(f"  metadata: {stats['meta_new']} new, {stats['meta_cached']} cached, "
         f"{stats['meta_fail']} FAILED")
-    log(f"  images:   {stats['img_new']} new, {stats['img_cached']} cached, "
-        f"{stats['img_fail']} FAILED")
+    log(f"  images:   {stats['img_new']} new ({stats['img_mirror']} via mirror), "
+        f"{stats['img_cached']} cached, {stats['img_fail']} FAILED")
     class _A:
         archive = outdir
     cmd_site(_A)

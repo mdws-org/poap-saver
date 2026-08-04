@@ -71,6 +71,19 @@ The hash sidecars matter: they let anyone verify later that an archived image
 is byte-identical to what POAP served while it was alive, without trusting the
 person who archived it.
 
+## The mirror
+
+The tool reads from and contributes to a community mirror of POAP event
+artwork at `poap-mirror.bemeadows.workers.dev` (an R2 bucket; the Worker is in
+[`mirror/`](mirror/)). The mirror never accepts uploaded bytes: an ingest
+request names an event, the Worker fetches that event's artwork from POAP's
+own origin, hashes what it received, and stores it immutably with the hash and
+source URL. So the mirror can only contain what POAP actually served, and
+every rescue that runs while POAP's hosts answer extends what survives after
+they stop. When the origin dies, the mirror locks read-only. If the mirror is
+unreachable, the tool falls back to POAP directly — it is an availability
+layer, never a requirement.
+
 ## What this cannot save
 
 - **Badges held in POAP's email custody.** Badges claimed to an email address
