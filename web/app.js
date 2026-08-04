@@ -131,7 +131,14 @@
                 if (!Array.isArray(out)) throw new Error(JSON.stringify(out.error || out));
                 var byId = {};
                 out.forEach(function (o) { byId[o.id] = o.result; });
-                return calls.map(function (_, i) { return byId[i]; });
+                var res = calls.map(function (_, i) { return byId[i]; });
+                /* A missing sub-result is a per-call error (rate limiting).
+                   Decoding it as zero would silently drop badges, so fail
+                   this endpoint and let the next one try. */
+                if (res.some(function (r) { return r == null; })) {
+                    throw new Error('partial batch failure');
+                }
+                return res;
             }).catch(function () { return attempt(u + 1); });
         }
         return attempt(0);
@@ -151,6 +158,10 @@
     }
 
     function resolveEns(name) {
+        if (!/^[\x00-\x7F]*$/.test(name)) {
+            return Promise.reject(new Error(
+                name + ': non-ASCII ENS names are not supported - paste the 0x address instead'));
+        }
         var node = hex(namehash(name));
         return rpcBatch('eth', ['0x0178b8bf' + node], ENS_REGISTRY).then(function (r) {
             var resolver = '0x' + (r[0] || '').slice(-40);
@@ -223,6 +234,12 @@
 
     function makeZip(files) {
         // files: [{name: 'a/b.txt', data: Uint8Array}]
+        // Store-only zip has hard format limits; fail loudly instead of
+        // silently wrapping the 16/32-bit fields into a corrupt archive.
+        if (files.length > 65535) {
+            throw new Error('This collection needs ' + files.length +
+                ' zip entries - past the zip format limit. Use the command line tool.');
+        }
         var parts = [], central = [], offset = 0;
         var now = new Date();
         var dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
@@ -248,6 +265,9 @@
             central.push({ head: cen, name: name });
             offset += 30 + name.length + f.data.length;
         });
+        if (offset > 0xFFFFFFFF) {
+            throw new Error('Archive exceeds the 4 GiB zip limit. Use the command line tool.');
+        }
         var cdStart = offset, cdSize = 0;
         central.forEach(function (c) {
             c.head.forEach(function (p) { parts.push(p); cdSize += p.length; });
@@ -357,28 +377,51 @@
                     return;
                 }
                 var item = items[i++];
-                worker(item).then(function () {
+                var tick = function () {
                     done++;
                     say('Saving badge ' + done + ' of ' + items.length + '…');
                     next();
-                });
+                };
+                worker(item).then(tick, tick);
             }
             if (!items.length) return resolve();
             for (var w = 0; w < Math.min(width, items.length); w++) next();
         });
     }
 
+    var stalePreviews = [];
+
     function run(input) {
+        if (!(window.crypto && crypto.subtle)) {
+            say('This page needs a secure context (https:// or file://) - ' +
+                'crypto.subtle is unavailable here, so images cannot be hash-verified.');
+            return;
+        }
         ui.button.disabled = true;
         ui.log.textContent = '';
         ui.result.textContent = '';
+        stalePreviews.forEach(function (u) { URL.revokeObjectURL(u); });
+        stalePreviews = [];
+        if (/^0X[0-9a-fA-F]{40}$/.test(input)) input = '0x' + input.slice(2);
         var addrPromise = /^0x[0-9a-fA-F]{40}$/.test(input)
             ? Promise.resolve(input)
             : (say('Resolving ' + input + '…'), resolveEns(input));
 
-        var address;
+        var address, tpl;
         addrPromise.then(function (a) {
             address = a.toLowerCase();
+            /* The gallery template is required to finish the zip; fetch it
+               first so a missing file fails in one second, not after a
+               hundred megabytes of badge downloads. */
+            return fetch('gallery-template.html');
+        }).then(function (r) {
+            if (!r.ok) {
+                throw new Error('gallery-template.html is missing beside this page (HTTP '
+                    + r.status + ') - it must be deployed with index.html and app.js');
+            }
+            return r.text();
+        }).then(function (t) {
+            tpl = t;
             say('Looking up badges for ' + address + '…');
             return Promise.all([enumerate('gnosis', address), enumerate('eth', address)]);
         }).then(function (both) {
@@ -396,21 +439,35 @@
             return pool(toks, 3, function (t) {
                 return rescueToken(t, files, rows, fails);
             }).then(function () {
-                return fetch('gallery-template.html').then(function (r) { return r.text(); })
-                .then(function (tpl) {
                     rows.sort(function (a, b) { return (b.y || 0) - (a.y || 0); });
+                    rows.forEach(function (p) {
+                        if (p.preview) stalePreviews.push(p.preview);
+                    });
+                    /* preview holds page-lifetime blob: URLs - meaningless
+                       inside the archive, so strip before serializing. */
+                    var clean = rows.map(function (p) {
+                        var c = {}, k;
+                        for (k in p) if (k !== 'preview') c[k] = p[k];
+                        return c;
+                    });
+                    /* "</" must not appear inside the gallery's inline
+                       <script>: metadata is third-party text and "</script>"
+                       in it would end the element. Function replacement also
+                       keeps $-patterns in metadata literal. */
+                    var data = JSON.stringify(clean).replace(/<\//g, '<\\/');
                     var gallery = tpl
                         .replace(/__ADDRESS__/g, address)
-                        .replace(/__COUNT__/g, String(rows.length))
-                        .replace('__DATA__', JSON.stringify(rows));
+                        .replace(/__COUNT__/g, String(clean.length))
+                        .replace('__DATA__', function () { return data; });
                     files.push({ name: 'index.html',
                                  data: new TextEncoder().encode(gallery) });
                     files.push({ name: 'manifest.json',
                                  data: new TextEncoder().encode(JSON.stringify({
                                      generated: Math.floor(Date.now() / 1000),
-                                     address: address, count: rows.length,
+                                     address: address, count: clean.length,
                                      contract: POAP, failures: fails,
                                      tool: 'poap-saver web',
+                                     poaps: clean,
                                  }, null, 2)) });
                     var prefix = 'poap-archive-' + address.slice(2, 10) + '/';
                     files.forEach(function (f) { f.name = prefix + f.name; });
@@ -427,7 +484,6 @@
                     showPreview(rows);
                     a.click();
                     ui.button.disabled = false;
-                });
             });
         }).catch(function (e) {
             say(e.message);
