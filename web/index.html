@@ -20,6 +20,10 @@ button:disabled{opacity:.5;cursor:wait}
 #status{min-height:1.5em;color:var(--title)}
 #log{font-size:.8rem;color:var(--soft);padding-left:18px}
 #result a{color:var(--accent)}
+#preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:20px}
+#preview .pv{margin:0;border:1px solid var(--rule);padding:8px}
+#preview img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--bg)}
+#preview figcaption{font-size:.7rem;color:var(--soft);margin-top:6px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .fine{font-size:.8rem;color:var(--soft);border-top:1px solid var(--rule);margin-top:34px;padding-top:14px}
 .fine a{color:inherit}
 </style>
@@ -43,6 +47,7 @@ ever asked for — an address is all it needs.</p>
 <p id="status"></p>
 <ul id="log"></ul>
 <p id="result"></p>
+<div id="preview"></div>
 <p class="fine">Runs entirely in your browser against public RPC endpoints and
 POAP's own hosts. Large collections take a few minutes and are held in memory
 until the zip downloads. Source and a command-line version:

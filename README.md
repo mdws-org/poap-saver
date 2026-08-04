@@ -29,16 +29,28 @@ Everything runs client-side. The page uploads nothing and has no server side.
 
 ## On the command line
 
-Requires Python 3.9+. No dependencies.
+Requires Python 3.9+. No dependencies. With [uv](https://docs.astral.sh/uv/)
+or pipx, no install step either:
 
 ```
+uvx --from git+https://github.com/mdws-org/poap-saver poap-saver rescue name.eth
+pipx run --spec git+https://github.com/mdws-org/poap-saver poap-saver rescue name.eth
+```
+
+Or clone and run directly — the tool is a single file with no dependencies:
+
+```
+git clone https://github.com/mdws-org/poap-saver
+cd poap-saver
 ./poap-saver rescue name.eth          # or a 0x address
-./poap-saver site poap-archive-xxxx   # write a gallery into the archive
 ```
 
-`rescue` is safe to re-run: finished tokens are skipped, and a cached image is
-trusted only if its recorded hash still verifies. If some fetches fail, run it
-again; only the failures are retried.
+`rescue` fetches everything and writes the gallery in one step. It is safe to
+re-run: finished tokens are skipped, and a cached image is trusted only if its
+recorded hash still verifies. If some fetches fail, run it again; only the
+failures are retried. `poap-saver site <archive>` regenerates the gallery for
+an existing archive — useful after the template improves — without touching
+the network.
 
 ## The archive format
 

@@ -332,6 +332,8 @@
                                      data: new TextEncoder().encode(sha + '  ' + fname + '\n') });
                         row.img = dir + fname;
                         row.sha = sha;
+                        row.preview = URL.createObjectURL(
+                            new Blob([bytes], { type: ctype || 'image/png' }));
                     });
                 });
             });
@@ -422,6 +424,7 @@
                     var doneMsg = rows.length + ' badges saved';
                     if (fails.length) doneMsg += ', ' + fails.length + ' failed — run it again later for those';
                     say(doneMsg + '. Unzip the download and open index.html.');
+                    showPreview(rows);
                     a.click();
                     ui.button.disabled = false;
                 });
@@ -430,6 +433,21 @@
             say(e.message);
             ui.button.disabled = false;
         });
+    }
+
+    function showPreview(rows) {
+        var el = document.getElementById('preview');
+        if (!el) return;
+        var html = '';
+        rows.forEach(function (p) {
+            if (!p.preview) return;
+            html += '<figure class="pv">' +
+                '<img loading="lazy" src="' + p.preview + '" alt="">' +
+                '<figcaption>' + String(p.n).replace(/[&<>"]/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+                }) + '</figcaption></figure>';
+        });
+        el.innerHTML = html;
     }
 
     ui.form.addEventListener('submit', function (e) {
