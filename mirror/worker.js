@@ -122,7 +122,9 @@ export default {
             });
         }
 
-        const img = url.pathname.match(/^\/img\/(\d{1,12})$/);
+        /* One canonical key per event: no leading zeros, so 007 and 7 cannot
+           both be stored (which would also multiply the storage cap). */
+        const img = url.pathname.match(/^\/img\/(0|[1-9]\d{0,11})$/);
 
         if (img && req.method === 'DELETE') {
             if (!isAdmin(req, env)) return json(403, { error: 'admin only' });
@@ -153,23 +155,24 @@ export default {
             return json(200, { ok: true, ...(await recount(env)) });
         }
 
-        const ing = url.pathname.match(/^\/ingest\/(\d{1,12})$/);
+        const ing = url.pathname.match(/^\/ingest\/(0|[1-9]\d{0,11})$/);
         if (ing && req.method === 'POST') {
             if (env.WRITES_OPEN !== '1') {
                 return json(403, { error: 'mirror is read-only (origin gone)' });
             }
             const eventId = ing[1];
             const key = 'img/' + eventId;
-            if (await env.MIRROR.head(key)) {
-                return json(200, { ok: true, note: 'already mirrored' });
-            }
 
-            /* Rate limit before any origin work, so a flood costs us nothing
-             * and costs POAP's servers nothing either. */
+            /* Rate limit first — before the already-mirrored check, so
+             * replaying known ids cannot run up unmetered work either. */
             if (env.INGEST_LIMIT) {
                 const who = req.headers.get('cf-connecting-ip') || 'anon';
                 const { success } = await env.INGEST_LIMIT.limit({ key: who });
                 if (!success) return json(429, { error: 'slow down' });
+            }
+
+            if (await env.MIRROR.head(key)) {
+                return json(200, { ok: true, note: 'already mirrored' });
             }
 
             const u = await usage(env);
@@ -183,9 +186,23 @@ export default {
             }
 
             /* Bind the image to the event using POAP's own metadata, so nobody
-             * can file one event's artwork under another event's id. */
-            const turi = req.headers.get('x-token-uri') || '';
-            if (!turi.startsWith('https://api.poap.tech/metadata/' + eventId + '/')) {
+             * can file one event's artwork under another event's id.
+             *
+             * Compare the PARSED url, never the raw string: fetch() applies
+             * WHATWG normalization, so ".../metadata/100/../1/1" starts with
+             * ".../metadata/100/" as text but actually resolves to event 1.
+             * Parsing first collapses dot segments (and %2e escapes) before
+             * the comparison, which is what closes that hole. */
+            const turiRaw = req.headers.get('x-token-uri') || '';
+            let turiUrl;
+            try {
+                turiUrl = new URL(turiRaw);
+            } catch {
+                return json(400, { error: 'x-token-uri is not a URL' });
+            }
+            const turi = turiUrl.toString();
+            if (turiUrl.origin !== 'https://api.poap.tech'
+                || !turiUrl.pathname.startsWith('/metadata/' + eventId + '/')) {
                 return json(400, {
                     error: 'x-token-uri must be the api.poap.tech metadata URL for event ' + eventId,
                 });
@@ -198,7 +215,8 @@ export default {
             } catch {
                 return json(502, { error: 'metadata origin unreachable' });
             }
-            if ((meta.image_url || meta.image || '') !== src) {
+            if (!meta || typeof meta !== 'object'
+                || (meta.image_url || meta.image || '') !== src) {
                 return json(409, {
                     error: 'x-source-url is not the image POAP lists for this event',
                 });
