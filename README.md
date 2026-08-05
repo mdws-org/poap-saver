@@ -93,9 +93,11 @@ read-only, and if it is ever unreachable the tool falls back to POAP — it is
 an availability layer, never a requirement.
 
 Everything in it is verifiable and copyable: [`registry/events.json`](registry/)
-lists every mirrored event with its SHA-256, size, source URL and IPFS CID, so
-anyone can check an object byte-for-byte or pin the same content themselves
-without asking anyone's permission.
+lists events with their SHA-256, size, source URL and IPFS CID, so anyone can
+check an object byte-for-byte or pin the same content themselves without asking
+anyone's permission. The registry is generated from a local archive rather than
+by listing the mirror, and it stamps what the mirror reported when it was
+written — so a reader can see whether the two have since diverged.
 
 ## What this cannot save
 

@@ -12,9 +12,14 @@ the same merkle-DAG arithmetic any IPFS implementation does. Reproducibility
 depends on the exact flags, so they are recorded in the registry file itself:
 anyone running that command on the same bytes lands on the same CID.
 
+The registry is built from a local poap-saver archive, and it says so in the
+file: it lists the events THAT ARCHIVE holds, which is a superset-or-equal of
+what was contributed to the mirror from it, not a listing of the mirror's live
+contents. The stamped mirror counts let a reader see at a glance whether the
+two had diverged when it was written.
+
 Usage:
-    ./scripts/build-registry.py            # from a local archive (fast)
-    ./scripts/build-registry.py --from-mirror   # pull each object from the mirror
+    ./scripts/build-registry.py     # from a local archive
 
 Requires kubo (`brew install ipfs`). Writes registry/events.json.
 """
@@ -26,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,8 +47,12 @@ _ENV = dict(os.environ, IPFS_PATH=os.path.join(
 def _ensure_repo():
     if os.path.isdir(os.path.join(_ENV["IPFS_PATH"], "blocks")):
         return
-    subprocess.run(["ipfs", "init", "--profile=test"],
-                   env=_ENV, capture_output=True, text=True)
+    r = subprocess.run(["ipfs", "init", "--profile=test"],
+                       env=_ENV, capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.isdir(
+            os.path.join(_ENV["IPFS_PATH"], "blocks")):
+        raise SystemExit("could not initialise a scratch IPFS repo at "
+                         + _ENV["IPFS_PATH"] + ": " + r.stderr.strip())
 
 
 def cid_of(path):
@@ -69,14 +79,15 @@ def from_archive(archive):
     return rows
 
 
-def from_mirror(tmp):
-    """Pull every event the mirror holds. Slower, but authoritative."""
-    info = json.load(urllib.request.urlopen(MIRROR + "/", timeout=30))
-    print(f"mirror holds {info.get('events')} events")
-    raise SystemExit(
-        "listing the mirror needs an admin endpoint; run against a local "
-        "archive for now (the archive and the mirror hold identical bytes, "
-        "which the sha256 in this registry lets anyone confirm)")
+def mirror_stamp():
+    """What the mirror reports right now, recorded for comparison."""
+    try:
+        req = urllib.request.Request(
+            MIRROR + "/", headers={"User-Agent": "poap-saver-registry/1.0"})
+        info = json.load(urllib.request.urlopen(req, timeout=30))
+        return {"events": info.get("events"), "bytes": info.get("bytes")}
+    except Exception as e:  # noqa: BLE001 - the stamp is informational
+        return {"error": str(e)}
 
 
 def main():
@@ -85,15 +96,13 @@ def main():
                     default=os.path.expanduser(
                         "~/.config/benmeadowsbot/wallet/poap-archive"),
                     help="local poap-saver archive to read")
-    ap.add_argument("--from-mirror", action="store_true")
     args = ap.parse_args()
 
     if not shutil.which("ipfs"):
         raise SystemExit("kubo not found - install it with: brew install ipfs")
 
     _ensure_repo()
-    tmp = tempfile.mkdtemp()
-    rows = from_mirror(tmp) if args.from_mirror else from_archive(args.archive)
+    rows = from_archive(args.archive)
     print(f"{len(rows)} events")
 
     events = {}
@@ -109,8 +118,16 @@ def main():
             print(f"  {n}/{len(rows)}")
 
     out = {
-        "what": "POAP event artwork held by the poap-mirror, with hashes and IPFS CIDs",
+        "what": ("POAP event artwork from a poap-saver archive, with SHA-256 "
+                 "hashes and IPFS CIDs, so anyone can verify or re-pin the "
+                 "same bytes"),
+        "scope": ("Built from a local archive, not a listing of the mirror. "
+                  "mirror_at_build records what the mirror reported when this "
+                  "file was written; if its event count has since grown, this "
+                  "registry covers only part of the mirror."),
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "mirror": MIRROR,
+        "mirror_at_build": mirror_stamp(),
         "verify_sha256": "curl -s " + MIRROR + "/img/<eventId> | shasum -a 256",
         "verify_cid": " ".join(CID_CMD) + " <file>",
         "note": ("CIDs are reproducible only with the exact command above - "
@@ -123,7 +140,6 @@ def main():
     with open(path, "w") as f:
         json.dump(out, f, indent=1, sort_keys=True)
     print(f"wrote {path} ({os.path.getsize(path)//1024} KB, {len(events)} events)")
-    shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -27,8 +27,8 @@
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type,x-source-url,x-token-uri',
+    'Access-Control-Allow-Methods': 'GET, HEAD, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'content-type,x-source-url,x-token-uri,x-admin-key',
     'Access-Control-Expose-Headers': 'x-sha256,x-source-url,etag',
 };
 
@@ -56,8 +56,11 @@ function looksLikeImage(bytes) {
     if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
         return true;                                                  // ISO-BMFF (AVIF)
     }
-    const head = new TextDecoder().decode(b).trim().toLowerCase();
-    return head.startsWith('<svg') || head.startsWith('<?xml');
+    /* SVG needs a wider window than the binary signatures: exporters put a
+       DOCTYPE or a generator comment before the root element. */
+    const head = new TextDecoder().decode(new Uint8Array(bytes.slice(0, 512)))
+        .trim().toLowerCase();
+    return head.includes('<svg');
 }
 
 function json(status, obj) {
@@ -100,7 +103,13 @@ export default {
      * concurrent ingests lose updates permanently. A daily recount from the
      * real bucket listing bounds that drift to a day. */
     async scheduled(event, env) {
-        await recount(env);
+        try {
+            const u = await recount(env);
+            console.log('recount ok', JSON.stringify(u));
+        } catch (e) {
+            console.error('recount FAILED', e && e.message);
+            throw e;
+        }
     },
 
     async fetch(req, env) {
@@ -118,6 +127,7 @@ export default {
                 events: u.objects,
                 bytes: u.bytes,
                 cap_bytes: CAP_BYTES,
+                rate_limited: Boolean(env.INGEST_LIMIT),
                 source: 'https://github.com/mdws-org/poap-saver',
             });
         }
@@ -211,6 +221,11 @@ export default {
             try {
                 const m = await fetch(turi, { headers: { 'user-agent': 'poap-mirror/1.0' } });
                 if (!m.ok) return json(502, { error: 'metadata origin answered ' + m.status });
+                /* Redirects are followed, so the checked URL is only the first
+                   hop. Re-pin the host the response actually came from. */
+                if (m.url && new URL(m.url).origin !== 'https://api.poap.tech') {
+                    return json(502, { error: 'metadata redirected off api.poap.tech' });
+                }
                 meta = await m.json();
             } catch {
                 return json(502, { error: 'metadata origin unreachable' });
@@ -224,6 +239,9 @@ export default {
 
             const o = await fetch(src, { headers: { 'user-agent': 'poap-mirror/1.0' } });
             if (!o.ok) return json(502, { error: 'origin answered ' + o.status });
+            if (o.url && new URL(o.url).origin !== 'https://assets.poap.xyz') {
+                return json(502, { error: 'image redirected off assets.poap.xyz' });
+            }
             const ctype = (o.headers.get('content-type') || '')
                 .split(';')[0].trim().toLowerCase();
             const buf = await o.arrayBuffer();
@@ -241,7 +259,7 @@ export default {
              * concurrent double-ingest can neither overwrite an object nor
              * double-count the ledger. */
             const put = await env.MIRROR.put(key, buf, {
-                onlyIf: { etagDoesNotMatch: '*' },
+                onlyIf: new Headers({ 'If-None-Match': '*' }),
                 httpMetadata: { contentType: ctype },
                 customMetadata: { sha256: sha, source: src, ingested: String(Date.now()) },
             });

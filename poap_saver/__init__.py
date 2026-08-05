@@ -248,8 +248,10 @@ def fetch(url, binary=False, _depth=0, tries=3):
                                  _depth + 1, tries)
             if r.status == 429 or r.status >= 500:
                 _drop(p.scheme, p.netloc)
-                time.sleep(10 * (attempt + 1))
                 last = RuntimeError(f"HTTP {r.status}")
+                if attempt + 1 >= tries:
+                    break
+                time.sleep(10 * (attempt + 1))
                 continue
             if r.status != 200:
                 raise RuntimeError(f"HTTP {r.status}")

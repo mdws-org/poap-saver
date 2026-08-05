@@ -283,9 +283,19 @@
     }
 
     /* ---------------------------------------------------------- rescue -- */
-    function mirrorOn() {
+    /* Latched once per run: toggling mid-rescue must not start leaking
+       events without a fresh decision, nor pretend the already-sent ones
+       were never sent. */
+    var mirrorLatched = false;
+
+    function readMirrorChoice() {
         var el = document.getElementById('use-mirror');
-        return Boolean(el && el.checked);
+        mirrorLatched = Boolean(el && el.checked);
+        return mirrorLatched;
+    }
+
+    function mirrorOn() {
+        return mirrorLatched;
     }
 
     var ui = {
@@ -431,6 +441,7 @@
         ui.button.disabled = true;
         ui.log.textContent = '';
         ui.result.textContent = '';
+        readMirrorChoice();
         stalePreviews.forEach(function (u) { URL.revokeObjectURL(u); });
         stalePreviews = [];
         if (/^0X[0-9a-fA-F]{40}$/.test(input)) input = '0x' + input.slice(2);
