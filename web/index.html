@@ -42,16 +42,20 @@ your browser fetches every badge's metadata and artwork directly, records a
 SHA-256 of each image, and gives you one zip: the archive plus a gallery page
 that works offline, forever. Nothing is uploaded, and no wallet connection is
 ever asked for — an address is all it needs.</p>
-<p>By default the page talks to nobody but POAP and a public Gnosis node. The
-community mirror below is optional and off unless you turn it on.</p>
+<p>Saving also feeds a community mirror, which keeps a copy of each badge's
+artwork so it stays reachable after POAP's servers stop answering. The mirror
+never receives your files: it fetches artwork from POAP itself and checks it
+against POAP's own metadata. It learns which events were saved, and your IP
+address — not your wallet address. Every badge it holds is already public on
+chain. Uncheck the box to skip it, and the page talks to nobody but POAP and a
+public Gnosis node.</p>
 <form id="rescue-form">
 <input id="address" type="text" placeholder="0x… or name.eth" aria-label="Address or ENS name" autocomplete="off" spellcheck="false">
 <button id="go" type="submit">Save my POAPs</button>
 </form>
-<label class="mirror-opt"><input type="checkbox" id="use-mirror">
-Also use the community mirror. Faster, and it keeps working for events other
-people already saved after POAP's servers go away - but it tells the mirror
-which events this address holds.</label>
+<label class="mirror-opt"><input type="checkbox" id="use-mirror" checked>
+Help the community mirror. It is also faster, and it keeps working for events
+other people already saved once POAP is gone.</label>
 <p id="status"></p>
 <ul id="log"></ul>
 <p id="result"></p>

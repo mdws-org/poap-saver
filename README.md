@@ -78,10 +78,16 @@ There is a community mirror of POAP event artwork at
 [`mirror/`](mirror/), MIT like the rest). Every rescue that reaches it while
 POAP still answers extends what survives after POAP stops.
 
-**In the browser it is off unless you turn it on**, because using it tells the
-mirror which events an address holds. Unchecked, the page talks to nobody but
-POAP and a public Gnosis node. **On the command line it is on by default**;
-pass `--no-mirror` to fetch everything from POAP directly.
+**It is on by default in both the browser and the CLI.** Uncheck the box on the
+page, or pass `--no-mirror` on the command line, to fetch everything from POAP
+directly and talk to nobody else.
+
+The default is on because of the deadline. Artwork nobody mirrors before POAP's
+servers stop answering is gone, and a setting most people never find would have
+meant an archive of almost nothing. What using it costs you: the mirror sees
+which events were saved and the requesting IP. It does not see your wallet
+address, and it never receives your files. The badges it holds are public on
+chain already.
 
 The mirror never accepts uploaded bytes. An ingest request names an event and
 two POAP URLs; the Worker reads POAP's own metadata to confirm the artwork

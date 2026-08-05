@@ -24,14 +24,16 @@ objects are skipped, so an interrupted run just picks up where it stopped.
 """
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
+import urllib.parse
 
 MIRROR = os.environ.get("POAP_MIRROR",
                         "https://poap-mirror.bemeadows.workers.dev")
@@ -42,19 +44,59 @@ UA = "poap-saver-pin/1.0 (+https://github.com/mdws-org/poap-saver)"
 ADD = ["ipfs", "add", "--cid-version=1", "-Q"]
 
 
+class _Conn:
+    """One keep-alive connection to the mirror, reused for every request.
+
+    Opening a fresh connection per object gets throttled hard by Cloudflare —
+    a few objects a minute instead of dozens — which turns pinning a few
+    hundred badges into hours. Holding one connection open avoids that
+    entirely. Any failure drops the socket and the next try reconnects.
+    """
+
+    def __init__(self, base):
+        p = urllib.parse.urlparse(base)
+        self.host = p.netloc
+        self.https = p.scheme == "https"
+        self.prefix = p.path.rstrip("/")
+        self.c = None
+
+    def _connect(self):
+        if self.https:
+            return http.client.HTTPSConnection(
+                self.host, context=ssl.create_default_context(), timeout=180)
+        return http.client.HTTPConnection(self.host, timeout=180)
+
+    def get(self, path, tries=4, raw=False):
+        last = None
+        for attempt in range(tries):
+            try:
+                if self.c is None:
+                    self.c = self._connect()
+                self.c.request("GET", self.prefix + path,
+                               headers={"User-Agent": UA,
+                                        "Connection": "keep-alive"})
+                r = self.c.getresponse()
+                body = r.read()
+                if r.status != 200:
+                    raise RuntimeError(f"HTTP {r.status}")
+                return body if raw else json.loads(body)
+            except Exception as e:  # noqa: BLE001 - retried, then reported
+                last = e
+                try:
+                    self.c.close()
+                except Exception:  # noqa: BLE001 - already broken
+                    pass
+                self.c = None
+                if attempt + 1 < tries:
+                    time.sleep(4 * (attempt + 1))
+        raise SystemExit(f"GET {path} failed after {tries} tries: {last}")
+
+
+_MIRROR_CONN = _Conn(MIRROR)
+
+
 def get(path, tries=4, raw=False):
-    last = None
-    for attempt in range(tries):
-        try:
-            req = urllib.request.Request(MIRROR + path,
-                                         headers={"User-Agent": UA})
-            body = urllib.request.urlopen(req, timeout=180).read()
-            return body if raw else json.loads(body)
-        except Exception as e:  # noqa: BLE001 - retried, then reported
-            last = e
-            if attempt + 1 < tries:
-                time.sleep(4 * (attempt + 1))
-    raise SystemExit(f"GET {path} failed after {tries} tries: {last}")
+    return _MIRROR_CONN.get(path, tries=tries, raw=raw)
 
 
 def all_cids():
