@@ -1,3 +1,7 @@
 
 # wrangler local state (contains account id)
 .wrangler/
+
+# python bytecode (the scripts import one another)
+__pycache__/
+*.pyc
