@@ -108,9 +108,38 @@ check the mirror against the registry without trusting either.
 Everything in it is verifiable and copyable: [`registry/events.json`](registry/)
 lists events with their SHA-256, size, source URL and IPFS CID, so anyone can
 check an object byte-for-byte or pin the same content themselves without asking
-anyone's permission. The registry is generated from a local archive rather than
-by listing the mirror, and it stamps what the mirror reported when it was
-written — so a reader can see whether the two have since diverged.
+anyone's permission.
+
+The mirror also publishes that inventory live, so you never have to trust a
+checked-in file to be current:
+
+```
+curl -s https://poap-mirror.bemeadows.workers.dev/events   # sizes, hashes, origins
+curl -s https://poap-mirror.bemeadows.workers.dev/cids     # every CID it holds
+```
+
+Both are cursor-paginated: follow `cursor` while `truncated` is true.
+
+### Pinning it yourself
+
+This is the part that makes the artwork outlive the mirror. [`scripts/pin-mirror.py`](scripts/)
+walks the published CIDs, fetches each object, checks the bytes really hash to
+the advertised CID, and adds them to your own node:
+
+```
+./scripts/pin-mirror.py --dry-run     # see what it would pin
+./scripts/pin-mirror.py               # pin it all
+```
+
+It needs kubo and nothing else, skips what you already have, and re-runs safely
+after an interruption. Objects whose bytes do not match their advertised CID are
+refused rather than pinned, so a mirror serving altered artwork cannot launder
+it through your node.
+
+Once you have done this, the artwork is on IPFS in the way that actually
+matters: held and announced by a node that is not ours. Pinning is what makes
+content survive; a CID that only one server can answer for is still one server
+away from gone.
 
 ## What this cannot save
 

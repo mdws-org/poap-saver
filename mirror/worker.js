@@ -12,6 +12,8 @@
  *                                             metadata URL, used to prove the
  *                                             image really belongs to the event
  *   GET  /                  what this is, in JSON
+ *   GET  /events            every event held, with size, sha256 and origin URL
+ *   GET  /cids              every CID held, paired with its event
  *   POST /recount           (admin) rebuild the usage ledger from the bucket
  *   POST /cid               (admin) record the CID of an event's object
  *   DELETE /img/<eventId>   (admin) remove a poisoned object
@@ -28,6 +30,8 @@
  *
  * CIDs are computed offline (scripts/build-registry.py, kubo) and recorded
  * here, so /ipfs/<cid> resolves to exactly the bytes that hash to that CID.
+ * /events and /cids publish that inventory live, so anyone can enumerate what
+ * the mirror holds and pin it themselves without asking or being trusted.
  * This is a CID-ADDRESSED MIRROR, not yet a trustless gateway: it serves whole
  * files, not the individual blocks a verifying client would re-hash. Fetching
  * by CID and checking it yourself against registry/events.json is the
@@ -103,6 +107,12 @@ async function recount(env) {
     return { bytes, objects };
 }
 
+/* R2 caps list() at 1000; clamp rather than letting a bad ?limit throw. */
+function listLimit(url) {
+    const n = parseInt(url.searchParams.get('limit') || '1000', 10);
+    return Number.isFinite(n) ? Math.min(Math.max(n, 1), 1000) : 1000;
+}
+
 function isAdmin(req, env) {
     return Boolean(env.ADMIN_KEY) && req.headers.get('x-admin-key') === env.ADMIN_KEY;
 }
@@ -131,7 +141,7 @@ export default {
             const u = await usage(env);
             return json(200, {
                 what: 'poap-mirror: community availability cache for POAP event artwork',
-                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; POST /ingest/<eventId> with x-source-url + x-token-uri',
+                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /events; GET /cids; POST /ingest/<eventId> with x-source-url + x-token-uri',
                 writes: env.WRITES_OPEN === '1' ? 'open' : 'locked',
                 events: u.objects,
                 bytes: u.bytes,
@@ -148,16 +158,17 @@ export default {
         if (img && req.method === 'DELETE') {
             if (!isAdmin(req, env)) return json(403, { error: 'admin only' });
             await env.MIRROR.delete('img/' + img[1]);
-            /* Drop any CID index rows pointing at the object just removed, so
-               /ipfs/<cid> cannot outlive the bytes it addresses. */
+            /* Drop both CID index rows pointing at the object just removed, so
+               /ipfs/<cid> cannot outlive the bytes it addresses. The cidmap
+               prefix names this event's CIDs directly, so this is a single
+               scoped listing rather than a scan of every CID in the bucket. */
             let cursor;
             do {
-                const page = await env.MIRROR.list({ prefix: 'cid/', cursor, limit: 1000 });
+                const page = await env.MIRROR.list({
+                    prefix: 'cidmap/' + img[1] + '/', cursor, limit: 1000,
+                });
                 for (const o of page.objects) {
-                    const row = await env.MIRROR.get(o.key);
-                    if (row && (await row.text()).trim() === img[1]) {
-                        await env.MIRROR.delete(o.key);
-                    }
+                    await env.MIRROR.delete(['cid/' + o.key.slice(o.key.indexOf('/', 7) + 1), o.key]);
                 }
                 cursor = page.truncated ? page.cursor : undefined;
             } while (cursor);
@@ -180,6 +191,57 @@ export default {
             };
             if (req.method === 'HEAD') return new Response(null, { headers: h });
             return new Response(obj.body, { headers: h });
+        }
+
+        /* Public inventory. Anyone can enumerate what the mirror holds, verify
+           it against POAP's own origin, and pin the CIDs on their own node.
+           Both endpoints are cursor-paginated straight off the bucket listing,
+           so they stay cheap as the mirror grows. */
+        if (url.pathname === '/events' && (req.method === 'GET' || req.method === 'HEAD')) {
+            const page = await env.MIRROR.list({
+                prefix: 'img/',
+                limit: listLimit(url),
+                cursor: url.searchParams.get('cursor') || undefined,
+                include: ['customMetadata', 'httpMetadata'],
+            });
+            const events = {};
+            for (const o of page.objects) {
+                events[o.key.slice(4)] = {
+                    size: o.size,
+                    sha256: o.customMetadata?.sha256 || '',
+                    content_type: o.httpMetadata?.contentType || '',
+                    source_url: o.customMetadata?.source || '',
+                };
+            }
+            return json(200, {
+                count: page.objects.length,
+                truncated: page.truncated,
+                cursor: page.truncated ? page.cursor : null,
+                verify: 'curl -s <mirror>/img/<eventId> | shasum -a 256',
+                events,
+            });
+        }
+
+        if (url.pathname === '/cids' && (req.method === 'GET' || req.method === 'HEAD')) {
+            const page = await env.MIRROR.list({
+                prefix: 'cidmap/',
+                limit: listLimit(url),
+                cursor: url.searchParams.get('cursor') || undefined,
+            });
+            const cids = [];
+            for (const o of page.objects) {
+                const slash = o.key.indexOf('/', 7);
+                if (slash < 0) continue;
+                cids.push({ event: o.key.slice(7, slash), cid: o.key.slice(slash + 1) });
+            }
+            return json(200, {
+                count: cids.length,
+                truncated: page.truncated,
+                cursor: page.truncated ? page.cursor : null,
+                pin: 'ipfs pin add <cid>, after fetching it from <mirror>/ipfs/<cid>',
+                note: 'CIDs are kubo defaults: ipfs add --cid-version=1 --offline',
+                cids,
+            });
         }
 
         /* CID-addressed read. The cid -> event index is written by the admin
@@ -228,6 +290,10 @@ export default {
                 }
                 if (!(await env.MIRROR.head('img/' + ev))) continue;
                 await env.MIRROR.put('cid/' + cid, ev);
+                /* Reverse index, in the KEY rather than the body: listing a
+                   prefix returns key names only, so /cids can enumerate every
+                   pair with one list call per 1000 instead of one GET each. */
+                await env.MIRROR.put('cidmap/' + ev + '/' + cid, '');
                 wrote += 1;
             }
             return json(200, { ok: true, indexed: wrote, submitted: pairs.length });

@@ -1946,15 +1946,16 @@
    "source_url": "https://assets.poap.xyz/roll-call-test3a-feb-3-2023-2023-logo-1675458049623.png"
   }
  },
- "generated_at": "2026-08-05T00:23:46Z",
+ "generated_at": "2026-08-05T05:24:42Z",
  "mirror": "https://poap-mirror.bemeadows.workers.dev",
  "mirror_at_build": {
   "bytes": 308070855,
   "events": 324
  },
  "note": "CIDs are reproducible only with the exact command above - chunker, CID version and offline mode all affect the hash.",
- "scope": "Built from a local archive, not a listing of the mirror. mirror_at_build records what the mirror reported when this file was written; if its event count has since grown, this registry covers only part of the mirror.",
+ "scope": "Every event the mirror held when this was written; fetch any of them at <mirror>/ipfs/<cid> and pin it yourself.",
+ "source": "mirror listing",
  "verify_cid": "ipfs add --only-hash --cid-version=1 --offline -Q <file>",
  "verify_sha256": "curl -s https://poap-mirror.bemeadows.workers.dev/img/<eventId> | shasum -a 256",
- "what": "POAP event artwork from a poap-saver archive, with SHA-256 hashes and IPFS CIDs, so anyone can verify or re-pin the same bytes"
+ "what": "POAP event artwork with SHA-256 hashes and IPFS CIDs, so anyone can verify or re-pin the same bytes"
 }
