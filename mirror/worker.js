@@ -4,6 +4,7 @@
  * outlive the company. This Worker fronts an R2 bucket keyed by event id:
  *
  *   GET  /img/<eventId>     the archived artwork for that event
+ *   GET  /ipfs/<cid>        the same artwork addressed by its IPFS CID
  *   POST /ingest/<eventId>  ask the mirror to fetch and store that event's
  *                           artwork from POAP's own origin. Headers:
  *                             x-source-url    the assets.poap.xyz image URL
@@ -12,6 +13,7 @@
  *                                             image really belongs to the event
  *   GET  /                  what this is, in JSON
  *   POST /recount           (admin) rebuild the usage ledger from the bucket
+ *   POST /cid               (admin) record the CID of an event's object
  *   DELETE /img/<eventId>   (admin) remove a poisoned object
  *
  * The mirror never accepts uploaded bytes. Ingest fetches from POAP's origin
@@ -23,6 +25,13 @@
  * mirror becomes read-only, holding whatever the community ingested while it
  * could — and the binding check is exactly why that window matters: it can
  * only be enforced while POAP's metadata API still answers.
+ *
+ * CIDs are computed offline (scripts/build-registry.py, kubo) and recorded
+ * here, so /ipfs/<cid> resolves to exactly the bytes that hash to that CID.
+ * This is a CID-ADDRESSED MIRROR, not yet a trustless gateway: it serves whole
+ * files, not the individual blocks a verifying client would re-hash. Fetching
+ * by CID and checking it yourself against registry/events.json is the
+ * verification path today.
  */
 
 const CORS = {
@@ -122,7 +131,7 @@ export default {
             const u = await usage(env);
             return json(200, {
                 what: 'poap-mirror: community availability cache for POAP event artwork',
-                keys: 'GET /img/<eventId>; POST /ingest/<eventId> with x-source-url + x-token-uri',
+                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; POST /ingest/<eventId> with x-source-url + x-token-uri',
                 writes: env.WRITES_OPEN === '1' ? 'open' : 'locked',
                 events: u.objects,
                 bytes: u.bytes,
@@ -139,6 +148,19 @@ export default {
         if (img && req.method === 'DELETE') {
             if (!isAdmin(req, env)) return json(403, { error: 'admin only' });
             await env.MIRROR.delete('img/' + img[1]);
+            /* Drop any CID index rows pointing at the object just removed, so
+               /ipfs/<cid> cannot outlive the bytes it addresses. */
+            let cursor;
+            do {
+                const page = await env.MIRROR.list({ prefix: 'cid/', cursor, limit: 1000 });
+                for (const o of page.objects) {
+                    const row = await env.MIRROR.get(o.key);
+                    if (row && (await row.text()).trim() === img[1]) {
+                        await env.MIRROR.delete(o.key);
+                    }
+                }
+                cursor = page.truncated ? page.cursor : undefined;
+            } while (cursor);
             const u = await recount(env);
             return json(200, { ok: true, deleted: img[1], ...u });
         }
@@ -158,6 +180,57 @@ export default {
             };
             if (req.method === 'HEAD') return new Response(null, { headers: h });
             return new Response(obj.body, { headers: h });
+        }
+
+        /* CID-addressed read. The cid -> event index is written by the admin
+           /cid endpoint from offline-computed CIDs; unknown CIDs 404 rather
+           than guessing. */
+        const ipfs = url.pathname.match(/^\/ipfs\/(b[a-z2-7]{20,120})$/);
+        if (ipfs && (req.method === 'GET' || req.method === 'HEAD')) {
+            const idx = await env.MIRROR.get('cid/' + ipfs[1]);
+            if (!idx) return json(404, { error: 'cid not held by this mirror' });
+            const eventId = (await idx.text()).trim();
+            const obj = await env.MIRROR.get('img/' + eventId);
+            if (!obj) return json(404, { error: 'cid indexed but object missing' });
+            const h = {
+                'content-type': obj.httpMetadata?.contentType || 'application/octet-stream',
+                'cache-control': 'public, max-age=31536000, immutable',
+                'x-content-type-options': 'nosniff',
+                'content-security-policy': "default-src 'none'; sandbox",
+                'x-sha256': obj.customMetadata?.sha256 || '',
+                'x-source-url': obj.customMetadata?.source || '',
+                'x-poap-event': eventId,
+                etag: '"' + ipfs[1] + '"',
+                ...CORS,
+            };
+            if (req.method === 'HEAD') return new Response(null, { headers: h });
+            return new Response(obj.body, { headers: h });
+        }
+
+        /* Record an offline-computed CID for an event. Admin-only: the Worker
+           cannot verify a CID without implementing UnixFS chunking, so this
+           trusts the operator's kubo output rather than pretending otherwise. */
+        if (url.pathname === '/cid' && req.method === 'POST') {
+            if (!isAdmin(req, env)) return json(403, { error: 'admin only' });
+            let body;
+            try {
+                body = await req.json();
+            } catch {
+                return json(400, { error: 'body must be JSON' });
+            }
+            const pairs = Array.isArray(body) ? body : [body];
+            let wrote = 0;
+            for (const p of pairs) {
+                const ev = String(p && p.event || '');
+                const cid = String(p && p.cid || '');
+                if (!/^(0|[1-9]\d{0,11})$/.test(ev) || !/^b[a-z2-7]{20,120}$/.test(cid)) {
+                    continue;
+                }
+                if (!(await env.MIRROR.head('img/' + ev))) continue;
+                await env.MIRROR.put('cid/' + cid, ev);
+                wrote += 1;
+            }
+            return json(200, { ok: true, indexed: wrote, submitted: pairs.length });
         }
 
         if (url.pathname === '/recount' && req.method === 'POST') {

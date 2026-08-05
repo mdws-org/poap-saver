@@ -92,6 +92,19 @@ event POAP itself says it belongs to. When the origin dies the mirror locks
 read-only, and if it is ever unreachable the tool falls back to POAP — it is
 an availability layer, never a requirement.
 
+Every object is also addressable by its IPFS CID:
+
+```
+curl -s https://poap-mirror.bemeadows.workers.dev/ipfs/<cid> | shasum -a 256
+ipfs add --only-hash --cid-version=1 --offline -Q <the file you just saved>
+```
+
+Both should match the registry row for that event. This is a CID-addressed
+mirror rather than a full IPFS gateway: it serves whole files, not the
+individual blocks a verifying client would re-hash for itself, and it does not
+join the DHT. What it gives you is content-addressed fetching and a way to
+check the mirror against the registry without trusting either.
+
 Everything in it is verifiable and copyable: [`registry/events.json`](registry/)
 lists events with their SHA-256, size, source URL and IPFS CID, so anyone can
 check an object byte-for-byte or pin the same content themselves without asking
