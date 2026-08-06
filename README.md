@@ -71,6 +71,60 @@ The hash sidecars matter: they let anyone verify later that an archived image
 is byte-identical to what POAP served while it was alive, without trusting the
 person who archived it.
 
+## The archive and its registry
+
+The whole of POAP is archived, not just the badges people saved through the
+tool: every event that existed when POAP shut down — 190,153 events, 174,498
+unique artworks, all their metadata — crawled from POAP's own hosts in its
+final days, verified byte-for-byte against the SHA-256 of every file as
+served, and published to IPFS.
+
+[`registry/corpus/`](registry/corpus/) is the permanent map. One row per
+event: the artwork's SHA-256 as POAP served it, the artwork's IPFS CID, the
+metadata's CID, and the original URLs. `gaps.jsonl` lists the 3,847 ids in
+the 1–194,000 space that had nothing to save — recorded with their reason
+while POAP still answered, which is the difference between an archive that is
+missing something and an id that never existed. `summary.json` carries the
+totals and two root CIDs that cover everything:
+
+```
+all artwork (~157 GB):  bafybeiedeqc3ycrt5elg3vp2ad2c4p6hpj6afnhysbzb4pi2rhxlhi5x3a
+all metadata:           bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja
+```
+
+Anyone holding these registry files plus any copy of the blocks can rebuild
+the entire archive, and verify it, without trusting whoever served the
+blocks: a CID that does not match its content will not fetch.
+
+## Pinning it yourself
+
+This is the part that makes the archive outlive any single host. A CID only
+one node can answer for is still one node away from gone; every additional
+node that pins a badge is another place it survives.
+
+[`scripts/pin-mirror.py`](scripts/) reads the registry and pins what you
+choose on your own node:
+
+```
+./scripts/pin-mirror.py                          # show what's available
+./scripts/pin-mirror.py --archive poap-archive-you.eth/
+                                                 # pin your own badges
+./scripts/pin-mirror.py --events 4242,101250     # pin specific events
+./scripts/pin-mirror.py --all                    # pin all ~157 GB
+```
+
+It needs kubo and nothing else. Content arrives over IPFS itself, so
+integrity needs no separate check — your node rejects any block that does not
+hash to its CID before storing it. Already-pinned objects are skipped, so an
+interrupted run resumes where it stopped. `--archive` reads the badges out of
+an archive the rescue tool produced, which makes the two-step "save my
+badges, then make them permanent" flow:
+
+```
+./poap-saver rescue you.eth
+./scripts/pin-mirror.py --archive poap-archive-you.eth
+```
+
 ## The mirror
 
 There is a community mirror of POAP event artwork at
@@ -126,26 +180,11 @@ curl -s https://poap-mirror.bemeadows.workers.dev/cids     # every CID it holds
 
 Both are cursor-paginated: follow `cursor` while `truncated` is true.
 
-### Pinning it yourself
-
-This is the part that makes the artwork outlive the mirror. [`scripts/pin-mirror.py`](scripts/)
-walks the published CIDs, fetches each object, checks the bytes really hash to
-the advertised CID, and adds them to your own node:
-
-```
-./scripts/pin-mirror.py --dry-run     # see what it would pin
-./scripts/pin-mirror.py               # pin it all
-```
-
-It needs kubo and nothing else, skips what you already have, and re-runs safely
-after an interruption. Objects whose bytes do not match their advertised CID are
-refused rather than pinned, so a mirror serving altered artwork cannot launder
-it through your node.
-
-Once you have done this, the artwork is on IPFS in the way that actually
-matters: held and announced by a node that is not ours. Pinning is what makes
-content survive; a CID that only one server can answer for is still one server
-away from gone.
+The mirror's objects can also be pinned the legacy way —
+`./scripts/pin-mirror.py --mirror` fetches each object over HTTP, re-hashes it
+locally, and refuses any mismatch. The registry above supersedes this: it
+covers five hundred times as many events, and IPFS transport makes the
+integrity check inherent.
 
 ## What this cannot save
 
