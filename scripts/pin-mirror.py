@@ -141,25 +141,33 @@ def registry_summary(base):
     return json.loads(body)
 
 
-def registry_rows(base, summary):
-    """Every registry row, from a local checkout or over HTTP."""
-    if not base.startswith(("http://", "https://")):
-        paths = sorted(glob.glob(os.path.join(base, "events-*.jsonl")))
-        if not paths:
-            raise SystemExit(f"no events-*.jsonl under {base}")
-        for p in paths:
-            with open(p, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        yield json.loads(line)
-        return
+def registry_rows(base, summary, only_events=None):
+    """Registry rows from a local checkout or over HTTP.
+
+    When the caller already knows which events it wants, only the shard
+    files containing them are read - pinning two badges should not cost a
+    download of the whole registry.
+    """
     lo, hi = summary["span"]
-    for shard in range(lo // SHARD, hi // SHARD + 1):
+    shards = range(lo // SHARD, hi // SHARD + 1)
+    if only_events is not None:
+        wanted = {e // SHARD for e in only_events}
+        shards = [s for s in shards if s in wanted]
+    for shard in shards:
         a, b = shard * SHARD, shard * SHARD + SHARD - 1
-        body = fetch(base.rstrip("/") + f"/events-{a:06d}-{b:06d}.jsonl")
-        if body is None:  # a span band with no events has no file
-            continue
-        for line in body.decode("utf-8").splitlines():
+        name = f"events-{a:06d}-{b:06d}.jsonl"
+        if base.startswith(("http://", "https://")):
+            body = fetch(base.rstrip("/") + "/" + name)
+            if body is None:  # a span band with no events has no file
+                continue
+            lines = body.decode("utf-8").splitlines()
+        else:
+            path = os.path.join(base, name)
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        for line in lines:
             if line.strip():
                 yield json.loads(line)
 
@@ -247,7 +255,7 @@ def pin_registry(args):
                 part = part.strip()
                 if part:
                     wanted.add(int(part))
-        rows = [r for r in registry_rows(base, summary)
+        rows = [r for r in registry_rows(base, summary, only_events=wanted)
                 if r["event"] in wanted]
         missing = wanted - {r["event"] for r in rows}
         if missing:
