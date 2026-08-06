@@ -102,8 +102,17 @@ This is the part that makes the archive outlive any single host. A CID only
 one node can answer for is still one node away from gone; every additional
 node that pins a badge is another place it survives.
 
-[`scripts/pin-mirror.py`](scripts/) reads the registry and pins what you
-choose on your own node:
+Mirroring everything needs nothing but kubo and a running daemon — the two
+root CIDs above are recursive pins, and re-running resumes an interrupted
+transfer:
+
+```
+ipfs pin add bafybeiedeqc3ycrt5elg3vp2ad2c4p6hpj6afnhysbzb4pi2rhxlhi5x3a   # artwork, ~157 GB
+ipfs pin add bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja   # metadata
+```
+
+For subsets, [`scripts/pin-mirror.py`](scripts/) reads the registry and pins
+what you choose:
 
 ```
 ./scripts/pin-mirror.py                          # show what's available
