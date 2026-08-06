@@ -136,23 +136,27 @@ badges, then make them permanent" flow:
 
 ## The mirror
 
-There is a read-only community mirror of POAP event artwork at
+There is a read-only mirror of POAP event artwork at
 `poap-mirror.bemeadows.workers.dev` (an R2 bucket; the Worker is in
-[`mirror/`](mirror/), MIT like the rest). It holds the events people saved
-through the rescue tool while POAP's servers still answered.
+[`mirror/`](mirror/), MIT like the rest). It holds the events this project's
+own rescues saved while POAP's servers still answered — a fast HTTP copy of
+the badges we personally care about, nothing more. The full archive of every
+event is the registry above; that is where completeness lives.
 
-Both the browser and the CLI use it only as a fallback: artwork is fetched
-from POAP's own hosts, and the mirror is asked when POAP no longer answers
-for an event. Nothing is ever sent to it. Pass `--no-mirror` on the command
-line to skip the fallback and talk to POAP's hosts only.
+Both the browser and the CLI use the mirror only as a fallback: artwork is
+fetched from POAP's own hosts, then the mirror, then the IPFS archive through
+public gateways. Nothing is ever sent to it. Pass `--no-mirror` on the
+command line to skip it and talk to POAP's hosts only.
 
 While POAP's origin was alive, any rescue could grow the mirror through an
 ingest endpoint that verified every image against POAP's own metadata before
 storing it — proof only enforceable while that metadata API answered. Ingest
-is retired: the reason to grow this bucket ended when the full corpus was
-archived (see above), and the endpoint now answers `410 Gone`. What remains
-is immutable — only what POAP itself served, filed under the event POAP said
-it belonged to, each object carrying its SHA-256 as ingested.
+is retired: the endpoint answers `410 Gone`, and once the full corpus was on
+IPFS the community-ingested events were removed from the bucket rather than
+kept as a second copy — they remain in the registry and on IPFS like
+everything else. What the mirror holds is immutable: only what POAP itself
+served, filed under the event POAP said it belonged to, each object carrying
+its SHA-256 as ingested.
 
 Every object is also addressable by its IPFS CID:
 

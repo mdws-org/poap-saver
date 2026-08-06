@@ -1,5 +1,7 @@
-/* poap-mirror — a read-only archive of POAP event artwork saved through the
- * rescue tool while POAP's servers still answered.
+/* poap-mirror — a read-only mirror of the POAP event artwork this project's
+ * own rescues saved while POAP's servers still answered. The complete
+ * archive of every event lives in registry/corpus/ and on IPFS; this bucket
+ * is a fast HTTP copy of the badges we personally care about.
  *
  * This Worker fronts an R2 bucket keyed by event id:
  *
