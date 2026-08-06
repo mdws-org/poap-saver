@@ -14,6 +14,26 @@
        fallback for when POAP's own host stops answering; the page never
        sends it anything. */
     var MIRROR = 'https://poap-mirror.bemeadows.workers.dev';
+    /* The full archive on IPFS (registry/corpus/ in the repo): every event's
+       metadata at META_ROOT/<eventId>.json, artwork at ART_ROOT/<eventId>.
+       Names resolve through any public gateway, and the roots are pinned, so
+       this keeps answering after every HTTP host in this file is gone. */
+    var META_ROOT = 'bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja';
+    var ART_ROOT = 'bafybeidnp33uoncjsbpq2255xg27eiapmcidog46d3hmaf6zon3qecfig4';
+    var GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/'];
+
+    function fromGateways(path, err) {
+        var p = Promise.reject(err || new Error('no gateway answered'));
+        GATEWAYS.forEach(function (base) {
+            p = p.catch(function () {
+                return fetch(base + path).then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r;
+                });
+            });
+        });
+        return p;
+    }
 
     var RPCS = {
         gnosis: ['https://rpc.gnosischain.com', 'https://gnosis-rpc.publicnode.com', 'https://gnosis.drpc.org'],
@@ -332,6 +352,16 @@
 
     function rescueToken(tok, files, rows, fails) {
         return fetchWithRetry(tok.uri, 3).then(function (r) { return r.json(); })
+        .catch(function (e) {
+            var eid = eventIdFrom(tok.uri);
+            if (!eid) throw e;
+            return fromGateways(META_ROOT + '/' + eid + '.json', e)
+                .then(function (r) {
+                    note('event ' + eid + ': POAP did not answer; metadata ' +
+                         'from the IPFS archive');
+                    return r.json();
+                });
+        })
         .then(function (meta) {
             var dir = tok.chain + '/' + tok.id + '/';
             meta._archived_from = tok.uri;
@@ -348,16 +378,23 @@
             };
             rows.push(row);
             if (!imgUrl) return null;
-            /* POAP's own host first; the read-only mirror only when it no
-               longer answers. Bytes are hashed either way, and the mirror
-               publishes the SHA-256 of every object for checking. */
+            /* POAP's own host first; when it no longer answers, the
+               read-only mirror, then the IPFS archive through public
+               gateways. Bytes are hashed either way. */
             return fetchWithRetry(imgUrl, 3).catch(function (e) {
                 if (!eventId) throw e;
                 return fetch(MIRROR + '/img/' + eventId).then(function (r) {
-                    if (!r.ok) throw e;
+                    if (!r.ok) throw new Error('miss');
                     note('event ' + eventId + ': POAP did not answer; ' +
                          'artwork from the community mirror');
                     return r;
+                }).catch(function () {
+                    return fromGateways(ART_ROOT + '/' + eventId, e)
+                        .then(function (r) {
+                            note('event ' + eventId + ': POAP did not ' +
+                                 'answer; artwork from the IPFS archive');
+                            return r;
+                        });
                 });
             }).then(function (r) {
                 var ctype = r.headers.get('content-type');

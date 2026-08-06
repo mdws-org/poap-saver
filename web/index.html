@@ -56,11 +56,17 @@ depending on nobody.</p>
 <p id="result"></p>
 <div id="preview"></div>
 <p class="fine">Runs entirely in your browser against public RPC endpoints and
-POAP's own hosts; if POAP stops answering for an image, the page falls back to
-the read-only community mirror. Nothing is ever uploaded anywhere. Large
-collections take a few minutes and are held in memory until the zip downloads.
-Source and a command-line version:
-<a href="https://github.com/mdws-org/poap-saver">github.com/mdws-org/poap-saver</a>.</p>
+POAP's own hosts. When POAP stops answering, the page tries the read-only
+community mirror, then the IPFS archive through public gateways. Nothing is
+ever uploaded anywhere. Large collections take a few minutes and are held in
+memory until the zip downloads. Source and a command-line version:
+<a href="https://github.com/mdws-org/poap-saver">github.com/mdws-org/poap-saver</a>.
+The
+<a href="https://github.com/mdws-org/poap-saver/tree/main/registry/corpus">registry</a>
+explains how to mirror the whole archive.
+The roots, in case only this page survives:
+<code>bafybeiedeqc3ycrt5elg3vp2ad2c4p6hpj6afnhysbzb4pi2rhxlhi5x3a</code> (artwork),
+<code>bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja</code> (metadata).</p>
 </main>
 <script src="app.js"></script>
 </body>
