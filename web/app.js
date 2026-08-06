@@ -10,8 +10,9 @@
 
     var POAP = '0x22c1f6050e56d2876009903609a2cc3fef83b415';
     var ENS_REGISTRY = '0x00000000000c2e074ec69a0dfb2997ba6c7d2e1e';
-    /* Community mirror of POAP event artwork (mirror/ in the repo). Read
-       first, contribute after an origin fetch. Both optional by design. */
+    /* Read-only mirror of POAP event artwork (mirror/ in the repo). A
+       fallback for when POAP's own host stops answering; the page never
+       sends it anything. */
     var MIRROR = 'https://poap-mirror.bemeadows.workers.dev';
 
     var RPCS = {
@@ -283,20 +284,6 @@
     }
 
     /* ---------------------------------------------------------- rescue -- */
-    /* Latched once per run: toggling mid-rescue must not start leaking
-       events without a fresh decision, nor pretend the already-sent ones
-       were never sent. */
-    var mirrorLatched = false;
-
-    function readMirrorChoice() {
-        var el = document.getElementById('use-mirror');
-        mirrorLatched = Boolean(el && el.checked);
-        return mirrorLatched;
-    }
-
-    function mirrorOn() {
-        return mirrorLatched;
-    }
 
     var ui = {
         form: document.getElementById('rescue-form'),
@@ -361,25 +348,15 @@
             };
             rows.push(row);
             if (!imgUrl) return null;
-            var useMirror = mirrorOn();
-            var viaMirror = (useMirror && eventId)
-                ? fetch(MIRROR + '/img/' + eventId).then(function (r) {
-                      if (!r.ok) throw new Error('miss');
-                      return r;
-                  })
-                : Promise.reject(new Error('mirror off'));
-            return viaMirror.catch(function () {
-                return fetchWithRetry(imgUrl, 3).then(function (r) {
-                    if (useMirror && eventId
-                            && imgUrl.indexOf('https://assets.poap.xyz/') === 0) {
-                        fetch(MIRROR + '/ingest/' + eventId, {
-                            method: 'POST',
-                            headers: {
-                                'x-source-url': imgUrl,
-                                'x-token-uri': tok.uri,
-                            },
-                        }).catch(function () {});
-                    }
+            /* POAP's own host first; the read-only mirror only when it no
+               longer answers. Bytes are hashed either way, and the mirror
+               publishes the SHA-256 of every object for checking. */
+            return fetchWithRetry(imgUrl, 3).catch(function (e) {
+                if (!eventId) throw e;
+                return fetch(MIRROR + '/img/' + eventId).then(function (r) {
+                    if (!r.ok) throw e;
+                    note('event ' + eventId + ': POAP did not answer; ' +
+                         'artwork from the community mirror');
                     return r;
                 });
             }).then(function (r) {
@@ -441,7 +418,6 @@
         ui.button.disabled = true;
         ui.log.textContent = '';
         ui.result.textContent = '';
-        readMirrorChoice();
         stalePreviews.forEach(function (u) { URL.revokeObjectURL(u); });
         stalePreviews = [];
         if (/^0X[0-9a-fA-F]{40}$/.test(input)) input = '0x' + input.slice(2);

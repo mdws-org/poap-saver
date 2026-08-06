@@ -127,30 +127,23 @@ badges, then make them permanent" flow:
 
 ## The mirror
 
-There is a community mirror of POAP event artwork at
+There is a read-only community mirror of POAP event artwork at
 `poap-mirror.bemeadows.workers.dev` (an R2 bucket; the Worker is in
-[`mirror/`](mirror/), MIT like the rest). Every rescue that reaches it while
-POAP still answers extends what survives after POAP stops.
+[`mirror/`](mirror/), MIT like the rest). It holds the events people saved
+through the rescue tool while POAP's servers still answered.
 
-**It is on by default in both the browser and the CLI.** Uncheck the box on the
-page, or pass `--no-mirror` on the command line, to fetch everything from POAP
-directly and talk to nobody else.
+Both the browser and the CLI use it only as a fallback: artwork is fetched
+from POAP's own hosts, and the mirror is asked when POAP no longer answers
+for an event. Nothing is ever sent to it. Pass `--no-mirror` on the command
+line to skip the fallback and talk to POAP's hosts only.
 
-The default is on because of the deadline. Artwork nobody mirrors before POAP's
-servers stop answering is gone, and a setting most people never find would have
-meant an archive of almost nothing. What using it costs you: the mirror sees
-which events were saved and the requesting IP. It does not see your wallet
-address, and it never receives your files. The badges it holds are public on
-chain already.
-
-The mirror never accepts uploaded bytes. An ingest request names an event and
-two POAP URLs; the Worker reads POAP's own metadata to confirm the artwork
-really belongs to that event, fetches the image from POAP's origin, checks it
-is actually an image, hashes it, and stores it immutably with the hash and
-source URL. So the mirror can only hold what POAP served, filed under the
-event POAP itself says it belongs to. When the origin dies the mirror locks
-read-only, and if it is ever unreachable the tool falls back to POAP — it is
-an availability layer, never a requirement.
+While POAP's origin was alive, any rescue could grow the mirror through an
+ingest endpoint that verified every image against POAP's own metadata before
+storing it — proof only enforceable while that metadata API answered. Ingest
+is retired: the reason to grow this bucket ended when the full corpus was
+archived (see above), and the endpoint now answers `410 Gone`. What remains
+is immutable — only what POAP itself served, filed under the event POAP said
+it belonged to, each object carrying its SHA-256 as ingested.
 
 Every object is also addressable by its IPFS CID:
 

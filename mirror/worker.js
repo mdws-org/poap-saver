@@ -1,16 +1,10 @@
-/* poap-mirror — a community availability cache for POAP event artwork.
+/* poap-mirror — a read-only archive of POAP event artwork saved through the
+ * rescue tool while POAP's servers still answered.
  *
- * POAP artwork is per-event and lives on assets.poap.xyz, which will not
- * outlive the company. This Worker fronts an R2 bucket keyed by event id:
+ * This Worker fronts an R2 bucket keyed by event id:
  *
  *   GET  /img/<eventId>     the archived artwork for that event
  *   GET  /ipfs/<cid>        the same artwork addressed by its IPFS CID
- *   POST /ingest/<eventId>  ask the mirror to fetch and store that event's
- *                           artwork from POAP's own origin. Headers:
- *                             x-source-url    the assets.poap.xyz image URL
- *                             x-token-uri     that event's api.poap.tech
- *                                             metadata URL, used to prove the
- *                                             image really belongs to the event
  *   GET  /                  what this is, in JSON
  *   GET  /events            every event held, with size, sha256 and origin URL
  *   GET  /cids              every CID held, paired with its event
@@ -18,74 +12,37 @@
  *   POST /cid               (admin) record the CID of an event's object
  *   DELETE /img/<eventId>   (admin) remove a poisoned object
  *
- * The mirror never accepts uploaded bytes. Ingest fetches from POAP's origin
- * server-side, verifies the image belongs to the event by reading POAP's own
- * metadata, checks the bytes are actually an image, hashes them, and stores
- * that. So the bucket can only ever contain what POAP served, filed under the
- * event POAP itself says it belongs to. Objects are immutable once written.
- * When the origin stops answering, set WRITES_OPEN to anything but "1" and the
- * mirror becomes read-only, holding whatever the community ingested while it
- * could — and the binding check is exactly why that window matters: it can
- * only be enforced while POAP's metadata API still answers.
+ * Ingest is retired. While POAP's origin answered, POST /ingest let any rescue
+ * extend the mirror, with the artwork-to-event binding proven against POAP's
+ * own metadata; that proof was only enforceable while the origin lived, and
+ * the reason to grow this bucket ended when the full corpus was archived —
+ * every event, verified byte-for-byte, published to IPFS and mapped in
+ * registry/corpus/ in this repository. The endpoint answers 410 so old
+ * clients get a clean, non-retryable no (they fall back to fetching from
+ * POAP directly, which was always the design).
  *
- * CIDs are computed offline (scripts/build-registry.py, kubo) and recorded
- * here, so /ipfs/<cid> resolves to exactly the bytes that hash to that CID.
- * /events and /cids publish that inventory live, so anyone can enumerate what
- * the mirror holds and pin it themselves without asking or being trusted.
- * This is a CID-ADDRESSED MIRROR, not yet a trustless gateway: it serves whole
- * files, not the individual blocks a verifying client would re-hash. Fetching
- * by CID and checking it yourself against registry/events.json is the
- * verification path today.
+ * What remains is immutable: only what POAP itself served, filed under the
+ * event POAP said it belonged to, each object carrying its SHA-256 as
+ * ingested. CIDs were computed offline with kubo and recorded here, so
+ * /ipfs/<cid> resolves to exactly the bytes that hash to that CID, and
+ * /events + /cids publish the inventory so nobody has to trust this host.
  */
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, HEAD, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type,x-source-url,x-token-uri,x-admin-key',
+    'Access-Control-Allow-Headers': 'content-type,x-admin-key',
     'Access-Control-Expose-Headers': 'x-sha256,x-source-url,etag',
 };
 
-const MAX_BYTES = 15 * 1024 * 1024;
-
-/* Hard spend cap. R2 storage is $0.015/GB-month and the only unbounded cost
- * dimension, so the mirror refuses new ingests past this total. 180 GiB is
- * ~193 GB: about $2.90/month gross, ~$2.75 after R2's 10 GB free tier (which
- * is account-wide, not per-bucket). The ledger below can drift under
- * concurrency; the scheduled recount reconciles it. */
-const CAP_BYTES = 180 * 1024 * 1024 * 1024;
-
-/* Only real images get stored. POAP's CDN can answer 200 with an HTML error
- * body, and an immutable HTML "image" would poison that event for everyone. */
-const OK_TYPES = ['image/png', 'image/gif', 'image/jpeg', 'image/webp',
-                  'image/avif', 'image/svg+xml'];
-
-function looksLikeImage(bytes) {
-    const b = new Uint8Array(bytes.slice(0, 16));
-    const starts = (...sig) => sig.every((v, i) => b[i] === v);
-    if (starts(0x89, 0x50, 0x4e, 0x47)) return true;                  // PNG
-    if (starts(0x47, 0x49, 0x46, 0x38)) return true;                  // GIF8
-    if (starts(0xff, 0xd8, 0xff)) return true;                        // JPEG
-    if (starts(0x52, 0x49, 0x46, 0x46) && b[8] === 0x57) return true; // RIFF/WEBP
-    if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
-        return true;                                                  // ISO-BMFF (AVIF)
-    }
-    /* SVG needs a wider window than the binary signatures: exporters put a
-       DOCTYPE or a generator comment before the root element. */
-    const head = new TextDecoder().decode(new Uint8Array(bytes.slice(0, 512)))
-        .trim().toLowerCase();
-    return head.includes('<svg');
-}
+const REGISTRY =
+    'https://github.com/mdws-org/poap-saver/tree/main/registry/corpus';
 
 function json(status, obj) {
     return new Response(JSON.stringify(obj, null, 2), {
         status,
         headers: { 'content-type': 'application/json', ...CORS },
     });
-}
-
-function hex(buf) {
-    return [...new Uint8Array(buf)]
-        .map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function usage(env) {
@@ -140,13 +97,12 @@ export default {
         if (url.pathname === '/' || url.pathname === '') {
             const u = await usage(env);
             return json(200, {
-                what: 'poap-mirror: community availability cache for POAP event artwork',
-                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /events; GET /cids; POST /ingest/<eventId> with x-source-url + x-token-uri',
-                writes: env.WRITES_OPEN === '1' ? 'open' : 'locked',
+                what: 'poap-mirror: read-only archive of POAP artwork saved through the rescue tool',
+                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /events; GET /cids',
+                writes: 'retired - the full corpus is archived and on IPFS',
                 events: u.objects,
                 bytes: u.bytes,
-                cap_bytes: CAP_BYTES,
-                rate_limited: Boolean(env.INGEST_LIMIT),
+                registry: REGISTRY,
                 source: 'https://github.com/mdws-org/poap-saver',
             });
         }
@@ -304,110 +260,14 @@ export default {
             return json(200, { ok: true, ...(await recount(env)) });
         }
 
-        const ing = url.pathname.match(/^\/ingest\/(0|[1-9]\d{0,11})$/);
-        if (ing && req.method === 'POST') {
-            if (env.WRITES_OPEN !== '1') {
-                return json(403, { error: 'mirror is read-only (origin gone)' });
-            }
-            const eventId = ing[1];
-            const key = 'img/' + eventId;
-
-            /* Rate limit first — before the already-mirrored check, so
-             * replaying known ids cannot run up unmetered work either. */
-            if (env.INGEST_LIMIT) {
-                const who = req.headers.get('cf-connecting-ip') || 'anon';
-                const { success } = await env.INGEST_LIMIT.limit({ key: who });
-                if (!success) return json(429, { error: 'slow down' });
-            }
-
-            if (await env.MIRROR.head(key)) {
-                return json(200, { ok: true, note: 'already mirrored' });
-            }
-
-            const u = await usage(env);
-            if (u.bytes >= CAP_BYTES) {
-                return json(507, { error: 'mirror is at its storage cap' });
-            }
-
-            const src = req.headers.get('x-source-url') || '';
-            if (!src.startsWith('https://assets.poap.xyz/')) {
-                return json(400, { error: 'x-source-url must be an assets.poap.xyz URL' });
-            }
-
-            /* Bind the image to the event using POAP's own metadata, so nobody
-             * can file one event's artwork under another event's id.
-             *
-             * Compare the PARSED url, never the raw string: fetch() applies
-             * WHATWG normalization, so ".../metadata/100/../1/1" starts with
-             * ".../metadata/100/" as text but actually resolves to event 1.
-             * Parsing first collapses dot segments (and %2e escapes) before
-             * the comparison, which is what closes that hole. */
-            const turiRaw = req.headers.get('x-token-uri') || '';
-            let turiUrl;
-            try {
-                turiUrl = new URL(turiRaw);
-            } catch {
-                return json(400, { error: 'x-token-uri is not a URL' });
-            }
-            const turi = turiUrl.toString();
-            if (turiUrl.origin !== 'https://api.poap.tech'
-                || !turiUrl.pathname.startsWith('/metadata/' + eventId + '/')) {
-                return json(400, {
-                    error: 'x-token-uri must be the api.poap.tech metadata URL for event ' + eventId,
-                });
-            }
-            let meta;
-            try {
-                const m = await fetch(turi, { headers: { 'user-agent': 'poap-mirror/1.0' } });
-                if (!m.ok) return json(502, { error: 'metadata origin answered ' + m.status });
-                /* Redirects are followed, so the checked URL is only the first
-                   hop. Re-pin the host the response actually came from. */
-                if (m.url && new URL(m.url).origin !== 'https://api.poap.tech') {
-                    return json(502, { error: 'metadata redirected off api.poap.tech' });
-                }
-                meta = await m.json();
-            } catch {
-                return json(502, { error: 'metadata origin unreachable' });
-            }
-            if (!meta || typeof meta !== 'object'
-                || (meta.image_url || meta.image || '') !== src) {
-                return json(409, {
-                    error: 'x-source-url is not the image POAP lists for this event',
-                });
-            }
-
-            const o = await fetch(src, { headers: { 'user-agent': 'poap-mirror/1.0' } });
-            if (!o.ok) return json(502, { error: 'origin answered ' + o.status });
-            if (o.url && new URL(o.url).origin !== 'https://assets.poap.xyz') {
-                return json(502, { error: 'image redirected off assets.poap.xyz' });
-            }
-            const ctype = (o.headers.get('content-type') || '')
-                .split(';')[0].trim().toLowerCase();
-            const buf = await o.arrayBuffer();
-            if (buf.byteLength === 0 || buf.byteLength > MAX_BYTES) {
-                return json(413, { error: 'origin object empty or over ' + MAX_BYTES + ' bytes' });
-            }
-            if (!OK_TYPES.includes(ctype) || !looksLikeImage(buf)) {
-                return json(415, {
-                    error: 'origin did not return an image (content-type ' + (ctype || 'none') + ')',
-                });
-            }
-
-            const sha = hex(await crypto.subtle.digest('SHA-256', buf));
-            /* Conditional put: only the first writer of this key lands, so a
-             * concurrent double-ingest can neither overwrite an object nor
-             * double-count the ledger. */
-            const put = await env.MIRROR.put(key, buf, {
-                onlyIf: new Headers({ 'If-None-Match': '*' }),
-                httpMetadata: { contentType: ctype },
-                customMetadata: { sha256: sha, source: src, ingested: String(Date.now()) },
+        /* Ingest is retired: the full corpus is archived and on IPFS. 410
+         * rather than 404 so old clients get a definitive, non-retryable no;
+         * they fall back to fetching from POAP directly. */
+        if (url.pathname.startsWith('/ingest/') && req.method === 'POST') {
+            return json(410, {
+                error: 'ingest is retired - every POAP event is already archived',
+                registry: REGISTRY,
             });
-            if (!put) return json(200, { ok: true, note: 'already mirrored' });
-
-            u.bytes += buf.byteLength;
-            u.objects += 1;
-            await env.MIRROR.put('_usage', JSON.stringify(u));
-            return json(201, { ok: true, event: eventId, sha256: sha, bytes: buf.byteLength });
         }
 
         return json(404, { error: 'not found' });

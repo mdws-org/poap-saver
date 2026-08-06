@@ -38,10 +38,9 @@ RPCS = {
 }
 UA = "poap-saver/1.0 (+https://github.com/mdws-org/poap-saver)"
 
-# Community mirror of POAP event artwork (see mirror/ in the repo). Reads are
-# tried here first; after an origin fetch succeeds, the event is offered for
-# ingestion so the mirror grows with use. Either direction failing is fine —
-# the mirror is an availability layer, never a requirement.
+# Read-only mirror of POAP event artwork (see mirror/ in the repo). Used only
+# as a fallback when POAP's own host stops answering; nothing is ever sent to
+# it. An availability layer, never a requirement.
 MIRROR = "https://poap-mirror.bemeadows.workers.dev"
 
 SEL_BALANCE = "0x70a08231"
@@ -273,24 +272,6 @@ def _write_atomic(path, data):
 
 
 # -------------------------------------------------------------------- rescue
-def _offer_to_mirror(event_id, src, token_uri):
-    """Best-effort: ask the mirror to ingest this event from POAP's origin.
-
-    The mirror re-fetches and verifies against POAP's own metadata, so we send
-    only the two URLs. Failures are ignored: contributing is a courtesy, never
-    a requirement, and it must never slow down or break a rescue.
-    """
-    p = urllib.parse.urlparse(MIRROR)
-    try:
-        c = _conn(p.scheme, p.netloc)
-        c.request("POST", f"/ingest/{event_id}",
-                  headers={"User-Agent": UA, "x-source-url": src,
-                           "x-token-uri": token_uri, "Connection": "keep-alive"})
-        c.getresponse().read()
-    except Exception:  # noqa: BLE001 - contribution is optional by design
-        _drop(p.scheme, p.netloc)
-
-
 def archive_token(outdir, chain, wallet, token_id, uri, stats, failures,
                   use_mirror=True):
     tdir = os.path.join(outdir, chain, str(token_id))
@@ -347,21 +328,18 @@ def archive_token(outdir, chain, wallet, token_id, uri, stats, failures,
             img_file = cached
             stats["img_cached"] += 1
         else:
-            blob = ctype = None
-            if use_mirror and event_id:
+            try:
+                # POAP's own host first; the read-only mirror only when it
+                # no longer answers for this event.
                 try:
+                    blob, ctype = fetch(img_url, binary=True)
+                    img_source = "origin"
+                except Exception:  # noqa: BLE001 - origin gone, try mirror
+                    if not (use_mirror and event_id):
+                        raise
                     blob, ctype = fetch(f"{MIRROR}/img/{event_id}",
                                         binary=True, tries=1)
                     img_source = "mirror"
-                except Exception:  # noqa: BLE001 - fall through to origin
-                    blob = None
-            try:
-                if blob is None:
-                    blob, ctype = fetch(img_url, binary=True)
-                    img_source = "origin"
-                    if (use_mirror and event_id
-                            and img_url.startswith("https://assets.poap.xyz/")):
-                        _offer_to_mirror(event_id, img_url, uri)
                 ext = (mimetypes.guess_extension(ctype.split(";")[0].strip())
                        or os.path.splitext(urllib.parse.urlparse(img_url).path)[1]
                        or ".bin")
@@ -521,8 +499,8 @@ def main():
     r.add_argument("address", help="0x address or ENS name")
     r.add_argument("--out", help="archive directory (default: poap-archive-<addr>)")
     r.add_argument("--no-mirror", action="store_true",
-                   help="do not read from or contribute to the community "
-                        "mirror; fetch everything from POAP directly")
+                   help="never fall back to the read-only community mirror; "
+                        "talk to POAP's hosts only")
     r.set_defaults(fn=cmd_rescue)
     s = sub.add_parser("site", help="write a gallery index.html into an archive")
     s.add_argument("archive", help="archive directory from rescue")
