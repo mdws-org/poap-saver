@@ -36,6 +36,9 @@ button:disabled{opacity:.5;cursor:wait}
 #saver-dlg .prov b{font-weight:600}
 #saver-dlg .dead{opacity:.7}
 #saver-dlg .close{float:right;background:none;border:0;color:var(--ink);font-size:1.3rem;line-height:1;cursor:pointer}
+.opt{font-size:.85rem;color:var(--soft);margin:8px 0 0}
+.opt label{cursor:pointer}
+.opt input{margin-right:6px}
 .fine{font-size:.8rem;color:var(--soft);border-top:1px solid var(--rule);margin-top:34px;padding-top:14px}
 .fine a{color:inherit}
 </style>
@@ -63,6 +66,7 @@ depending on nobody.</p>
 <input id="address" type="text" placeholder="0x…, name.eth, or an event id" aria-label="Address, ENS name, or POAP event id" autocomplete="off" spellcheck="false">
 <button id="go" type="submit">Save my POAPs</button>
 </form>
+<p class="opt"><label><input type="checkbox" id="want-zip"> Also download a zip when it finishes</label></p>
 <p id="status"></p>
 <ul id="log"></ul>
 <p id="result"></p>
@@ -73,8 +77,9 @@ community mirror, then the IPFS archive through public gateways, then a copy
 of the complete archive held in S3-compatible object storage. Nothing is
 ever uploaded anywhere. A bare event id looks up one event instead of a
 wallet; results can be linked with <code>?address=</code> or
-<code>?event=</code>. Large collections take a few minutes and are held in
-memory until the zip downloads. Source and a command-line version:
+<code>?event=</code>. Results are shown here and nothing downloads unless you
+ask for the zip. Large collections take a few minutes and are held in memory.
+Source and a command-line version:
 <a href="https://github.com/mdws-org/poap-saver">github.com/mdws-org/poap-saver</a>.
 The
 <a href="https://github.com/mdws-org/poap-saver/tree/main/registry/corpus">registry</a>

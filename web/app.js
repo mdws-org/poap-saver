@@ -324,6 +324,7 @@
         status: document.getElementById('status'),
         log: document.getElementById('log'),
         result: document.getElementById('result'),
+        zip: document.getElementById('want-zip'),
     };
 
     function say(msg) {
@@ -564,10 +565,19 @@
                     ui.result.appendChild(a);
                     var doneMsg = rows.length + ' badges saved';
                     if (fails.length) doneMsg += ', ' + fails.length + ' failed — run it again later for those';
-                    say(doneMsg + '. Unzip the download and open index.html.');
                     showPreview(rows);
                     showCoverage(rows);
-                    a.click();
+                    /* The zip is offered, not forced. Everything is already
+                       rescued, hashed and on screen by now, so downloading
+                       unasked decides for the reader; the link is right there
+                       when they want the file. */
+                    if (ui.zip && ui.zip.checked) {
+                        say(doneMsg + '. Unzip the download and open index.html.');
+                        a.click();
+                    } else {
+                        say(doneMsg + ' and shown below. Nothing was downloaded - ' +
+                            'use the link above to save the zip.');
+                    }
                     ui.button.disabled = false;
             });
         }).catch(function (e) {
