@@ -21,9 +21,24 @@ button:disabled{opacity:.5;cursor:wait}
 #log{font-size:.8rem;color:var(--soft);padding-left:18px}
 #result a{color:var(--accent)}
 #preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:20px}
-#preview .pv{margin:0;border:1px solid var(--rule);padding:8px}
+#preview .pv{margin:0;border:1px solid var(--rule);padding:8px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;display:block;width:100%}
+#preview .pv:hover{border-color:var(--ink)}
 #preview img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--bg)}
-#preview figcaption{font-size:.7rem;color:var(--soft);margin-top:6px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+#preview .pv-n{font-size:.7rem;color:var(--soft);margin-top:6px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+#coverage{font-size:.85rem;border-left:2px solid var(--rule);padding-left:10px}
+#saver-dlg{background:var(--bg);color:var(--ink);border:1px solid var(--rule);max-width:min(560px,92vw);max-height:90vh;overflow:auto;padding:20px}
+#saver-dlg::backdrop{background:rgba(0,0,0,.75)}
+#saver-dlg img{max-width:100%;max-height:50vh;display:block;margin:0 auto;object-fit:contain}
+#saver-dlg h2{margin:14px 0 6px;font-size:1.05rem}
+#saver-dlg .desc{font-size:.85rem;color:var(--soft)}
+#saver-dlg .prov{margin-top:14px;border-top:1px solid var(--rule);padding-top:12px;font-size:.75rem;overflow-wrap:anywhere}
+#saver-dlg .prov div{margin:3px 0}
+#saver-dlg .prov b{font-weight:600}
+#saver-dlg .dead{opacity:.7}
+#saver-dlg .close{float:right;background:none;border:0;color:var(--ink);font-size:1.3rem;line-height:1;cursor:pointer}
+.opt{font-size:.85rem;color:var(--soft);margin:8px 0 0}
+.opt label{cursor:pointer}
+.opt input{margin-right:6px}
 .fine{font-size:.8rem;color:var(--soft);border-top:1px solid var(--rule);margin-top:34px;padding-top:14px}
 .fine a{color:inherit}
 </style>
@@ -48,18 +63,23 @@ registry</a> mapping each event to its content address so anyone can hold a
 copy. Saving your own is still worth doing: your zip is yours, on your disk,
 depending on nobody.</p>
 <form id="rescue-form">
-<input id="address" type="text" placeholder="0x… or name.eth" aria-label="Address or ENS name" autocomplete="off" spellcheck="false">
+<input id="address" type="text" placeholder="0x…, name.eth, or an event id" aria-label="Address, ENS name, or POAP event id" autocomplete="off" spellcheck="false">
 <button id="go" type="submit">Save my POAPs</button>
 </form>
+<p class="opt"><label><input type="checkbox" id="want-zip"> Also download a zip when it finishes</label></p>
 <p id="status"></p>
 <ul id="log"></ul>
 <p id="result"></p>
 <div id="preview"></div>
 <p class="fine">Runs entirely in your browser against public RPC endpoints and
 POAP's own hosts. When POAP stops answering, the page tries the read-only
-community mirror, then the IPFS archive through public gateways. Nothing is
-ever uploaded anywhere. Large collections take a few minutes and are held in
-memory until the zip downloads. Source and a command-line version:
+community mirror, then the IPFS archive through public gateways, then a copy
+of the complete archive held in S3-compatible object storage. Nothing is
+ever uploaded anywhere. A bare event id looks up one event instead of a
+wallet; results can be linked with <code>?address=</code> or
+<code>?event=</code>. Results are shown here and nothing downloads unless you
+ask for the zip. Large collections take a few minutes and are held in memory.
+Source and a command-line version:
 <a href="https://github.com/mdws-org/poap-saver">github.com/mdws-org/poap-saver</a>.
 The
 <a href="https://github.com/mdws-org/poap-saver/tree/main/registry/corpus">registry</a>
