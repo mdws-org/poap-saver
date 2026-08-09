@@ -12,7 +12,9 @@
     var ENS_REGISTRY = '0x00000000000c2e074ec69a0dfb2997ba6c7d2e1e';
     /* Read-only mirror of POAP event artwork (mirror/ in the repo). A
        fallback for when POAP's own host stops answering; the page never
-       sends it anything. */
+       sends it anything. The same Worker also fronts the COMPLETE archive
+       (every event) held in S3-compatible object storage:
+       /corpus/img/<eventId>, /corpus/meta/<eventId>, /corpus/index/<shard>. */
     var MIRROR = 'https://poap-mirror.bemeadows.workers.dev';
     /* The full archive on IPFS (registry/corpus/ in the repo): every event's
        metadata at META_ROOT/<eventId>.json, artwork at ART_ROOT/<eventId>.
@@ -21,6 +23,16 @@
     var META_ROOT = 'bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja';
     var ART_ROOT = 'bafybeidnp33uoncjsbpq2255xg27eiapmcidog46d3hmaf6zon3qecfig4';
     var GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/'];
+
+    /* Last tier: the complete archive out of S3-compatible object storage,
+       behind the same Worker. Tried after POAP, the mirror, and IPFS. */
+    function fromCorpus(kind, eventId) {
+        return fetch(MIRROR + '/corpus/' + kind + '/' + eventId)
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r;
+            });
+    }
 
     function fromGateways(path, err) {
         var p = Promise.reject(err || new Error('no gateway answered'));
@@ -360,6 +372,13 @@
                     note('event ' + eid + ': POAP did not answer; metadata ' +
                          'from the IPFS archive');
                     return r.json();
+                })
+                .catch(function () {
+                    return fromCorpus('meta', eid).then(function (r) {
+                        note('event ' + eid + ': POAP did not answer; metadata ' +
+                             'from the archive store');
+                        return r.json();
+                    });
                 });
         })
         .then(function (meta) {
@@ -380,7 +399,8 @@
             if (!imgUrl) return null;
             /* POAP's own host first; when it no longer answers, the
                read-only mirror, then the IPFS archive through public
-               gateways. Bytes are hashed either way. */
+               gateways, and finally the complete archive out of
+               S3-compatible object storage. Bytes are hashed either way. */
             return fetchWithRetry(imgUrl, 3).catch(function (e) {
                 if (!eventId) throw e;
                 return fetch(MIRROR + '/img/' + eventId).then(function (r) {
@@ -395,6 +415,12 @@
                                  'answer; artwork from the IPFS archive');
                             return r;
                         });
+                }).catch(function () {
+                    return fromCorpus('img', eventId).then(function (r) {
+                        note('event ' + eventId + ': POAP did not answer; ' +
+                             'artwork from the archive store');
+                        return r;
+                    });
                 });
             }).then(function (r) {
                 var ctype = r.headers.get('content-type');
@@ -455,6 +481,8 @@
         ui.button.disabled = true;
         ui.log.textContent = '';
         ui.result.textContent = '';
+        var cov = document.getElementById('coverage');
+        if (cov) cov.textContent = '';
         stalePreviews.forEach(function (u) { URL.revokeObjectURL(u); });
         stalePreviews = [];
         if (/^0X[0-9a-fA-F]{40}$/.test(input)) input = '0x' + input.slice(2);
@@ -465,6 +493,7 @@
         var address, tpl;
         addrPromise.then(function (a) {
             address = a.toLowerCase();
+            lastAddress = address;
             /* The gallery template is required to finish the zip; fetch it
                first so a missing file fails in one second, not after a
                hundred megabytes of badge downloads. */
@@ -537,6 +566,7 @@
                     if (fails.length) doneMsg += ', ' + fails.length + ' failed — run it again later for those';
                     say(doneMsg + '. Unzip the download and open index.html.');
                     showPreview(rows);
+                    showCoverage(rows);
                     a.click();
                     ui.button.disabled = false;
             });
@@ -546,25 +576,237 @@
         });
     }
 
+    /* ------------------------------------------- browse, modal, coverage --
+       Results render as a browsable gallery, not just a zip: each card opens
+       a provenance modal (same shape as the poap-vault gallery). The modal
+       image is the rescued original - full resolution, already hash-checked. */
+
+    function escHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+
+    var dlg = null, lastRows = [], lastAddress = null;
+
+    function ensureDialog() {
+        if (!dlg) {
+            dlg = document.createElement('dialog');
+            dlg.id = 'saver-dlg';
+            document.body.appendChild(dlg);
+            dlg.addEventListener('click', function (e) {
+                if (e.target === dlg) dlg.close();
+            });
+        }
+        return dlg;
+    }
+
+    function openModal(p) {
+        var d = ensureDialog();
+        var scan = null;
+        if (p.t != null) {
+            var host = p.c === 'gnosis' ? 'https://gnosisscan.io' : 'https://etherscan.io';
+            scan = host + '/nft/' + POAP + '/' + p.t;
+        }
+        d.innerHTML =
+            '<button class="close" id="saver-x" type="button" aria-label="Close">&times;</button>' +
+            (p.preview ? '<img src="' + p.preview + '" alt="' + escHtml(p.n) + '">' : '') +
+            '<h2>' + escHtml(p.n) + '</h2>' +
+            '<div class="desc">' + escHtml(p.d) + '</div>' +
+            '<div class="prov">' +
+            '<div><b>event</b> ' + escHtml(p.e == null ? '?' : p.e) +
+            (p.t != null ? ' &middot; <b>chain</b> ' + escHtml(p.c) +
+                ' &middot; <b>token</b> ' + escHtml(p.t) : '') + '</div>' +
+            (lastAddress && p.t != null
+                ? '<div><b>held by</b> ' + escHtml(lastAddress) + '</div>' : '') +
+            (p.uri ? '<div><b>token URI (POAP-hosted)</b> <span class="dead">' +
+                escHtml(p.uri) + '</span></div>' : '') +
+            (p.src ? '<div><b>original image (POAP-hosted)</b> <span class="dead">' +
+                escHtml(p.src) + '</span></div>' : '') +
+            '<div><b>sha256</b> ' + escHtml(p.sha || 'n/a') + '</div>' +
+            (p.e != null
+                ? '<div><b>archived image (IPFS)</b> <a href="https://ipfs.io/ipfs/' +
+                  ART_ROOT + '/' + p.e + '" target="_blank" rel="noopener">' +
+                  ART_ROOT.slice(0, 14) + '&hellip;/' + p.e + '</a></div>'
+                : '') +
+            (scan ? '<div><a href="' + scan +
+                '" target="_blank" rel="noopener">view token on chain</a></div>' : '') +
+            '</div>';
+        d.querySelector('#saver-x').addEventListener('click', function () { d.close(); });
+        d.showModal();
+    }
+
     function showPreview(rows) {
         var el = document.getElementById('preview');
         if (!el) return;
+        lastRows = rows;
         var html = '';
-        rows.forEach(function (p) {
+        rows.forEach(function (p, i) {
             if (!p.preview) return;
-            html += '<figure class="pv">' +
+            html += '<button class="pv" type="button" data-i="' + i + '">' +
                 '<img loading="lazy" src="' + p.preview + '" alt="">' +
-                '<figcaption>' + String(p.n).replace(/[&<>"]/g, function (c) {
-                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
-                }) + '</figcaption></figure>';
+                '<span class="pv-n">' + escHtml(p.n) + '</span></button>';
         });
         el.innerHTML = html;
+        if (!el.dataset.wired) {
+            el.dataset.wired = '1';
+            el.addEventListener('click', function (e) {
+                var card = e.target.closest('.pv');
+                if (card) openModal(lastRows[Number(card.dataset.i)]);
+            });
+        }
+    }
+
+    /* "How much of this collection is archived?" - answered from the
+       membership index, shard by shard. A shard that cannot be fetched makes
+       its events INDETERMINATE, never "missing": this readout must not claim
+       a gap it has not verified. */
+    function showCoverage(rows) {
+        var events = [], names = {};
+        rows.forEach(function (p) {
+            if (p.e != null && events.indexOf(p.e) === -1) {
+                events.push(p.e);
+                names[p.e] = p.n;
+            }
+        });
+        var unknown = rows.length - rows.filter(function (p) { return p.e != null; }).length;
+        if (!events.length) return;
+        var shards = {};
+        events.forEach(function (e) { shards[Math.floor(e / 1000)] = null; });
+        Promise.all(Object.keys(shards).map(function (s) {
+            return fetch(MIRROR + '/corpus/index/' + s)
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+                .then(function (m) { shards[s] = m; });
+        })).then(function () {
+            var archived = 0, missing = [], indeterminate = 0;
+            events.forEach(function (e) {
+                var m = shards[Math.floor(e / 1000)];
+                if (!m) indeterminate++;
+                else if (m[String(e)]) archived++;
+                else missing.push(e);
+            });
+            var el = document.getElementById('coverage');
+            if (!el) {
+                el = document.createElement('p');
+                el.id = 'coverage';
+                ui.result.parentNode.insertBefore(el, ui.result);
+            }
+            var txt = 'Archive coverage: ' + archived + ' of ' + events.length +
+                ' events in this collection are in the permanent archive.';
+            if (missing.length) {
+                txt += ' Not archived: ' + missing.map(function (e) {
+                    return 'event ' + e + ' (' + (names[e] || 'unnamed') + ')';
+                }).join(', ') + '.';
+            }
+            if (indeterminate) {
+                txt += ' ' + indeterminate + ' could not be checked just now.';
+            }
+            if (unknown) {
+                txt += ' ' + unknown + ' badge' + (unknown === 1 ? ' has' : 's have') +
+                    ' no readable event id.';
+            }
+            el.textContent = txt;
+        });
+    }
+
+    /* ---------------------------------------------------- event lookup --
+       A bare number looks up one event in the archive: metadata, artwork,
+       hash - no wallet required. This is for organizers and the curious. */
+    function runEvent(eid) {
+        ui.button.disabled = true;
+        ui.log.textContent = '';
+        ui.result.textContent = '';
+        var cov = document.getElementById('coverage');
+        if (cov) cov.textContent = '';
+        stalePreviews.forEach(function (u) { URL.revokeObjectURL(u); });
+        stalePreviews = [];
+        lastAddress = null;
+        say('Looking up event ' + eid + ' in the archive…');
+        var meta;
+        fromGateways(META_ROOT + '/' + eid + '.json')
+            .catch(function () { return fromCorpus('meta', eid); })
+            .then(function (r) { return r.json(); })
+            .then(function (m) {
+                meta = m;
+                say('Fetching artwork for event ' + eid + '…');
+                var imgUrl = m.image_url || m.image;
+                var p = imgUrl
+                    ? fetchWithRetry(imgUrl, 2)
+                    : Promise.reject(new Error('no image url in metadata'));
+                return p.catch(function () {
+                    return fetch(MIRROR + '/img/' + eid).then(function (r) {
+                        if (!r.ok) throw new Error('miss');
+                        return r;
+                    });
+                }).catch(function () {
+                    return fromGateways(ART_ROOT + '/' + eid);
+                }).catch(function () {
+                    return fromCorpus('img', eid);
+                });
+            })
+            .then(function (r) {
+                var ctype = r.headers.get('content-type');
+                return r.arrayBuffer().then(function (buf) {
+                    var bytes = new Uint8Array(buf);
+                    return sha256hex(bytes).then(function (sha) {
+                        var row = {
+                            c: 'gnosis', t: null, e: Number(eid),
+                            n: meta.name || 'POAP event ' + eid,
+                            d: (meta.description || '').trim(),
+                            y: meta.year || null, sha: sha, uri: null,
+                            src: meta.image_url || meta.image || null,
+                            preview: URL.createObjectURL(
+                                new Blob([bytes], { type: ctype || 'image/png' })),
+                        };
+                        stalePreviews.push(row.preview);
+                        showPreview([row]);
+                        var a = document.createElement('a');
+                        a.href = row.preview;
+                        a.download = 'poap-event-' + eid + extFor(ctype, row.src);
+                        a.textContent = 'Download artwork';
+                        ui.result.appendChild(a);
+                        ui.result.appendChild(document.createTextNode(' · '));
+                        var metaUrl = URL.createObjectURL(new Blob(
+                            [JSON.stringify(meta, null, 2)],
+                            { type: 'application/json' }));
+                        stalePreviews.push(metaUrl);
+                        var b = document.createElement('a');
+                        b.href = metaUrl;
+                        b.download = 'poap-event-' + eid + '.json';
+                        b.textContent = 'Download metadata';
+                        ui.result.appendChild(b);
+                        say('Event ' + eid + ': ' + row.n +
+                            ' — artwork verified, sha256 ' + sha.slice(0, 12) + '…');
+                        ui.button.disabled = false;
+                    });
+                });
+            })
+            .catch(function (e) {
+                say('Event ' + eid + ' is not in the archive — ' +
+                    'it may never have existed, or POAP never stored artwork for it ' +
+                    '(' + e.message + ').');
+                ui.button.disabled = false;
+            });
+    }
+
+    /* A bare number is an event id; anything else is an address or ENS name.
+       Either way the query lands in the URL so results can be linked. */
+    function dispatch(v) {
+        var isEvent = /^\d{1,12}$/.test(v);
+        try {
+            history.replaceState(null, '',
+                location.pathname + (isEvent ? '?event=' : '?address=') +
+                encodeURIComponent(v));
+        } catch (e) { /* file:// contexts refuse replaceState; fine */ }
+        if (isEvent) runEvent(v.replace(/^0+(?=\d)/, ''));
+        else run(v);
     }
 
     ui.form.addEventListener('submit', function (e) {
         e.preventDefault();
         var v = ui.input.value.trim();
-        if (v) run(v);
+        if (v) dispatch(v);
     });
 
     /* Test hook: lets test/zip-test.html exercise the zip writer with the
@@ -576,5 +818,8 @@
     if (qs.get('address')) {
         ui.input.value = qs.get('address');
         run(qs.get('address'));
+    } else if (qs.get('event') && /^\d{1,12}$/.test(qs.get('event'))) {
+        ui.input.value = qs.get('event');
+        runEvent(qs.get('event').replace(/^0+(?=\d)/, ''));
     }
 })();

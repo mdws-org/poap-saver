@@ -40,6 +40,114 @@ const CORS = {
 const REGISTRY =
     'https://github.com/mdws-org/poap-saver/tree/main/registry/corpus';
 
+/* ------------------------------------------------------------------ corpus
+ * The COMPLETE archive (every event, 190,153 of them) lives in a private
+ * bucket of S3-compatible object storage, mirrored from the verified corpus.
+ * This Worker is its only public face: it signs requests (SigV4), streams the
+ * object through, and parks the response in Cloudflare's edge cache, so the
+ * origin sees each object roughly once per point of presence.
+ *
+ *   GET /corpus/img/<eventId>    original artwork for that event
+ *   GET /corpus/meta/<eventId>   the metadata JSON POAP served for it
+ *
+ * The blob store is content-addressed and deduplicated, so by-event lookup
+ * goes through cindex/ shards (1000 events each) that live next to the data.
+ * Credentials are Worker secrets scoped to that one bucket; nothing here can
+ * touch any other storage.
+ */
+const CORPUS = {
+    host: 's3.us-west-002.backblazeb2.com',
+    bucket: 'poap-corpus-mirror',
+    region: 'us-west-002',
+};
+/* Ext codes as written by the crawler - jpeg and jpg both landed as .jpg. */
+const CORPUS_EXT = {
+    p: ['png', 'image/png'],
+    g: ['gif', 'image/gif'],
+    j: ['jpg', 'image/jpeg'],
+    w: ['webp', 'image/webp'],
+};
+
+const te = new TextEncoder();
+
+async function sha256hex(s) {
+    const d = await crypto.subtle.digest('SHA-256', te.encode(s));
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hmac(key, msg) {
+    const k = await crypto.subtle.importKey(
+        'raw', key instanceof Uint8Array ? key : te.encode(key),
+        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    return new Uint8Array(await crypto.subtle.sign('HMAC', k, te.encode(msg)));
+}
+
+/* Minimal SigV4 for GET: unsigned payload, three signed headers. */
+async function corpusFetch(env, key) {
+    const amz = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    const date = amz.slice(0, 8);
+    const uri = '/' + CORPUS.bucket + '/' +
+        key.split('/').map(encodeURIComponent).join('/');
+    const scope = date + '/' + CORPUS.region + '/s3/aws4_request';
+    const canonical = [
+        'GET', uri, '',
+        'host:' + CORPUS.host,
+        'x-amz-content-sha256:UNSIGNED-PAYLOAD',
+        'x-amz-date:' + amz,
+        '',
+        'host;x-amz-content-sha256;x-amz-date',
+        'UNSIGNED-PAYLOAD',
+    ].join('\n');
+    const toSign = ['AWS4-HMAC-SHA256', amz, scope,
+        await sha256hex(canonical)].join('\n');
+    let k = await hmac('AWS4' + env.CORPUS_APP_KEY, date);
+    k = await hmac(k, CORPUS.region);
+    k = await hmac(k, 's3');
+    k = await hmac(k, 'aws4_request');
+    const sig = [...await hmac(k, toSign)]
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    return fetch('https://' + CORPUS.host + uri, {
+        headers: {
+            authorization: 'AWS4-HMAC-SHA256 Credential=' + env.CORPUS_KEY_ID +
+                '/' + scope +
+                ', SignedHeaders=host;x-amz-content-sha256;x-amz-date' +
+                ', Signature=' + sig,
+            'x-amz-date': amz,
+            'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+        },
+    });
+}
+
+/* Origin-once: everything the corpus serves is immutable, so cache under a
+ * synthetic URL keyed by object name and let the edge absorb repeats. */
+async function corpusCached(env, ctx, key, contentType) {
+    const cacheKey = 'https://corpus-cache.invalid/' + key;
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return hit;
+    const up = await corpusFetch(env, key);
+    if (!up.ok) {
+        return null;
+    }
+    const res = new Response(await up.arrayBuffer(), {
+        headers: {
+            'content-type': contentType,
+            'cache-control': 'public, max-age=31536000, immutable',
+        },
+    });
+    ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
+    return res;
+}
+
+function corpusHeaders(extra) {
+    return {
+        'cache-control': 'public, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        ...CORS,
+        ...extra,
+    };
+}
+
 function json(status, obj) {
     return new Response(JSON.stringify(obj, null, 2), {
         status,
@@ -90,7 +198,7 @@ export default {
         }
     },
 
-    async fetch(req, env) {
+    async fetch(req, env, ctx) {
         const url = new URL(req.url);
         if (req.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: CORS });
@@ -100,13 +208,81 @@ export default {
             const u = await usage(env);
             return json(200, {
                 what: 'poap-mirror: read-only archive of POAP artwork saved through the rescue tool',
-                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /events; GET /cids',
+                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /corpus/img/<eventId>; GET /corpus/meta/<eventId>; GET /events; GET /cids',
                 writes: 'retired - the full corpus is archived and on IPFS',
+                corpus: 'complete archive of every POAP event, served from S3-compatible object storage',
                 events: u.objects,
                 bytes: u.bytes,
                 registry: REGISTRY,
                 source: 'https://github.com/mdws-org/poap-saver',
             });
+        }
+
+        /* Membership index, one shard per 1000 events: lets a page answer
+           "is event N archived?" for a whole wallet with a handful of small
+           cached fetches instead of one probe per badge. */
+        const cidx = url.pathname.match(/^\/corpus\/index\/(0|[1-9]\d{0,6})$/);
+        if (cidx && (req.method === 'GET' || req.method === 'HEAD')) {
+            if (!env.CORPUS_KEY_ID || !env.CORPUS_APP_KEY) {
+                return json(503, { error: 'corpus tier not configured' });
+            }
+            const res = await corpusCached(env, ctx,
+                'cindex/' + cidx[1] + '.json', 'application/json');
+            if (!res) return json(404, { error: 'no such index shard' });
+            const h = corpusHeaders({
+                'content-type': 'application/json',
+                etag: '"cindex-' + cidx[1] + '"',
+            });
+            if (req.method === 'HEAD') return new Response(null, { headers: h });
+            return new Response(res.body, { headers: h });
+        }
+
+        /* ------------------------------------------------ complete corpus */
+        const corp = url.pathname.match(/^\/corpus\/(img|meta)\/(0|[1-9]\d{0,11})$/);
+        if (corp && (req.method === 'GET' || req.method === 'HEAD')) {
+            if (!env.CORPUS_KEY_ID || !env.CORPUS_APP_KEY) {
+                return json(503, { error: 'corpus tier not configured' });
+            }
+            const eventId = corp[2];
+
+            if (corp[1] === 'meta') {
+                const res = await corpusCached(env, ctx,
+                    'meta/' + eventId + '.json', 'application/json');
+                if (!res) return json(404, { error: 'event not in corpus', registry: REGISTRY });
+                const h = corpusHeaders({
+                    'content-type': 'application/json',
+                    'x-poap-event': eventId,
+                    etag: '"meta-' + eventId + '"',
+                });
+                if (req.method === 'HEAD') return new Response(null, { headers: h });
+                return new Response(res.body, { headers: h });
+            }
+
+            const shard = await corpusCached(env, ctx,
+                'cindex/' + Math.floor(Number(eventId) / 1000) + '.json',
+                'application/json');
+            if (!shard) return json(404, { error: 'event not in corpus', registry: REGISTRY });
+            const entry = (await shard.clone().json())[eventId];
+            if (!entry) {
+                return json(404, {
+                    error: 'event not in corpus',
+                    note: 'either it never existed or POAP never stored artwork for it - see gaps.jsonl in the registry',
+                    registry: REGISTRY,
+                });
+            }
+            const [sha, code] = entry;
+            const [ext, ct] = CORPUS_EXT[code] || ['bin', 'application/octet-stream'];
+            const res = await corpusCached(env, ctx,
+                'blob/' + sha.slice(0, 2) + '/' + sha + '.' + ext, ct);
+            if (!res) return json(404, { error: 'blob missing from corpus store' });
+            const h = corpusHeaders({
+                'content-type': ct,
+                'x-sha256': sha,
+                'x-poap-event': eventId,
+                etag: '"' + sha + '"',
+            });
+            if (req.method === 'HEAD') return new Response(null, { headers: h });
+            return new Response(res.body, { headers: h });
         }
 
         /* One canonical key per event: no leading zeros, so 007 and 7 cannot
