@@ -218,6 +218,16 @@ integrity check inherent.
 - The zip is store-only. Badge images are already compressed; deflate would
   add a dependency and save nothing.
 
+## Costs
+
+The archive runs on a machine at home holding 194 GB. Add its power, the
+connection it serves over, object storage for a second copy, and a domain. That
+comes to a few dollars a month on top of the hardware. The repo has a sponsor
+button for anyone who wants to cover part of it.
+
+Pinning a root is the more useful thing. If you already run a node, it costs
+disk.
+
 ## License
 
 MIT.

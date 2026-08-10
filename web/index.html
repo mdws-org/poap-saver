@@ -41,6 +41,10 @@ button:disabled{opacity:.5;cursor:wait}
 .opt input{margin-right:6px}
 .fine{font-size:.8rem;color:var(--soft);border-top:1px solid var(--rule);margin-top:34px;padding-top:14px}
 .fine a{color:inherit}
+.mirror{margin-top:34px;border-top:1px solid var(--rule);padding-top:16px}
+.mirror h2{color:var(--title);font-size:1.05rem;margin:0 0 10px}
+.mirror pre{border:1px solid var(--rule);padding:10px 12px;margin:0 0 14px;font-size:.72rem;color:var(--soft);overflow-x:auto}
+.mirror .fine{border-top:0;margin-top:0;padding-top:0}
 </style>
 </head>
 <body>
@@ -87,6 +91,22 @@ explains how to mirror the whole archive.
 The roots, in case only this page survives:
 <code>bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i</code> (artwork),
 <code>bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu</code> (metadata).</p>
+<section class="mirror">
+<h2>Mirror it</h2>
+<p>One node serves this archive today - a machine on a home connection. Every
+content address on this page resolves because that machine is awake. For
+something meant to outlive the company that shut down, that is thin.</p>
+<p>If you already run IPFS, one command changes it. Pin the metadata first:
+145 MB, all 197,577 events, and the only surviving copy of their names, dates
+and descriptions. The registry records every hash, but a hash is not a name.
+The artwork is 194 GB, so pin that when you have the disk.</p>
+<pre><code>ipfs pin add bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu   # metadata, 145 MB
+ipfs pin add bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i   # artwork, 194 GB</code></pre>
+<p class="fine">Nothing here asks for money. The archive runs on a machine at
+home, its power and connection, a few dollars a month of object storage, and a
+domain. What it needs is other people holding copies, which costs nothing if
+your node is already running.</p>
+</section>
 </main>
 <script src="app.js"></script>
 </body>

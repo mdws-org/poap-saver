@@ -1,0 +1,3 @@
+# Renders a "Sponsor" button on the repo. The github: entry only appears once
+# GitHub Sponsors is enabled on the account; until then this file is inert.
+github: [TheBenMeadows]
