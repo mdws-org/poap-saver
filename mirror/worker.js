@@ -121,13 +121,25 @@ async function corpusFetch(env, key) {
 
 /* Origin-once: everything the corpus serves is immutable, so cache under a
  * synthetic URL keyed by object name and let the edge absorb repeats. */
+/* Returns the object, or null when the store says it genuinely is not there
+ * (upstream 404), or false when the store could not answer at all. Those are
+ * different facts and callers must not merge them: reporting a rate-limited or
+ * erroring fetch as "event not in corpus" tells a reader the archive does not
+ * hold something it does hold, which is the one thing this project cannot get
+ * wrong. Observed for real on 2026-08-10, when the store briefly throttled
+ * right after a bulk upload and events that exist returned "not in corpus". */
 async function corpusCached(env, ctx, key, contentType) {
     const cacheKey = 'https://corpus-cache.invalid/' + key;
     const hit = await caches.default.match(cacheKey);
     if (hit) return hit;
-    const up = await corpusFetch(env, key);
+    let up;
+    try {
+        up = await corpusFetch(env, key);
+    } catch (e) {
+        return false;                       // network/DNS/TLS - never a miss
+    }
     if (!up.ok) {
-        return null;
+        return up.status === 404 ? null : false;
     }
     const res = new Response(await up.arrayBuffer(), {
         headers: {
@@ -137,6 +149,17 @@ async function corpusCached(env, ctx, key, contentType) {
     });
     ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
     return res;
+}
+
+/* 502, not 404: the archive is fine, this hop failed. Retryable, and says so. */
+function upstreamDown(what) {
+    return json(502, {
+        error: 'the archive store did not answer',
+        note: 'this is a transient failure at the storage tier, not a statement ' +
+              'about whether the archive holds ' + what + '. Retry shortly, or ' +
+              'read the same bytes from IPFS.',
+        registry: REGISTRY,
+    });
 }
 
 function corpusHeaders(extra) {
@@ -229,6 +252,7 @@ export default {
             }
             const res = await corpusCached(env, ctx,
                 'cindex/' + cidx[1] + '.json', 'application/json');
+            if (res === false) return upstreamDown('that index shard');
             if (!res) return json(404, { error: 'no such index shard' });
             const h = corpusHeaders({
                 'content-type': 'application/json',
@@ -257,6 +281,9 @@ export default {
             for (const [ext, ct] of [['mp4', 'video/mp4'], ['webp', 'image/webp']]) {
                 const res = await corpusCached(env, ctx,
                     'anim/' + eventId + '.' + ext, ct);
+                /* A failed hop must not fall through to the next format and
+                   end as "no derivative" - that would invent a hard answer. */
+                if (res === false) return upstreamDown('an animation for that event');
                 if (!res) continue;
                 const h = corpusHeaders({
                     'content-type': ct,
@@ -284,6 +311,7 @@ export default {
             if (corp[1] === 'meta') {
                 const res = await corpusCached(env, ctx,
                     'meta/' + eventId + '.json', 'application/json');
+                if (res === false) return upstreamDown('that event');
                 if (!res) return json(404, { error: 'event not in corpus', registry: REGISTRY });
                 const h = corpusHeaders({
                     'content-type': 'application/json',
@@ -297,6 +325,9 @@ export default {
             const shard = await corpusCached(env, ctx,
                 'cindex/' + Math.floor(Number(eventId) / 1000) + '.json',
                 'application/json');
+            /* The shard is how we know whether the event exists at all, so a
+               failure here is precisely the case that must not read as a miss. */
+            if (shard === false) return upstreamDown('that event');
             if (!shard) return json(404, { error: 'event not in corpus', registry: REGISTRY });
             const entry = (await shard.clone().json())[eventId];
             if (!entry) {
@@ -314,6 +345,7 @@ export default {
             if (corp[1] === 'thumb') {
                 const t = await corpusCached(env, ctx,
                     'thumb/' + sha.slice(0, 2) + '/' + sha + '.webp', 'image/webp');
+                if (t === false) return upstreamDown('a thumbnail for that event');
                 if (!t) {
                     return json(404, {
                         error: 'no thumbnail for this event',
@@ -332,6 +364,7 @@ export default {
 
             const res = await corpusCached(env, ctx,
                 'blob/' + sha.slice(0, 2) + '/' + sha + '.' + ext, ct);
+            if (res === false) return upstreamDown('that artwork');
             if (!res) return json(404, { error: 'blob missing from corpus store' });
             const h = corpusHeaders({
                 'content-type': ct,
