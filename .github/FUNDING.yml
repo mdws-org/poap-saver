@@ -1,3 +1,4 @@
-# Renders a "Sponsor" button on the repo. The github: entry only appears once
-# GitHub Sponsors is enabled on the account; until then this file is inert.
+# Renders a "Sponsor" button on the repo. Listing a user works on an
+# org-owned repo, so this is live regardless of mdws-org's own approval state.
 github: [TheBenMeadows]
+patreon: TheBenMeadows
