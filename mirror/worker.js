@@ -49,6 +49,7 @@ const REGISTRY =
  *
  *   GET /corpus/img/<eventId>    original artwork for that event
  *   GET /corpus/meta/<eventId>   the metadata JSON POAP served for it
+ *   GET /corpus/thumb/<eventId>  400px WebP still, for grid browsing
  *
  * The blob store is content-addressed and deduplicated, so by-event lookup
  * goes through cindex/ shards (1000 events each) that live next to the data.
@@ -208,7 +209,7 @@ export default {
             const u = await usage(env);
             return json(200, {
                 what: 'poap-mirror: read-only archive of POAP artwork saved through the rescue tool',
-                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /corpus/img/<eventId>; GET /corpus/meta/<eventId>; GET /events; GET /cids',
+                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /corpus/img/<eventId>; GET /corpus/meta/<eventId>; GET /corpus/thumb/<eventId>; GET /corpus/anim/<eventId>; GET /events; GET /cids',
                 writes: 'retired - the full corpus is archived and on IPFS',
                 corpus: 'complete archive of every POAP event, served from S3-compatible object storage',
                 events: u.objects,
@@ -273,7 +274,7 @@ export default {
         }
 
         /* ------------------------------------------------ complete corpus */
-        const corp = url.pathname.match(/^\/corpus\/(img|meta)\/(0|[1-9]\d{0,11})$/);
+        const corp = url.pathname.match(/^\/corpus\/(img|meta|thumb)\/(0|[1-9]\d{0,11})$/);
         if (corp && (req.method === 'GET' || req.method === 'HEAD')) {
             if (!env.CORPUS_KEY_ID || !env.CORPUS_APP_KEY) {
                 return json(503, { error: 'corpus tier not configured' });
@@ -307,6 +308,28 @@ export default {
             }
             const [sha, code] = entry;
             const [ext, ct] = CORPUS_EXT[code] || ['bin', 'application/octet-stream'];
+
+            /* Thumbnails are keyed by SHA exactly like the blobs, so the 24,449
+               events that share artwork share one 400px render too. */
+            if (corp[1] === 'thumb') {
+                const t = await corpusCached(env, ctx,
+                    'thumb/' + sha.slice(0, 2) + '/' + sha + '.webp', 'image/webp');
+                if (!t) {
+                    return json(404, {
+                        error: 'no thumbnail for this event',
+                        note: 'a small number of archived blobs are not decodable images - POAP served a data: URI, a video, or a truncated file - so no thumbnail exists. The original bytes are still at /corpus/img/<eventId>.',
+                    });
+                }
+                const th = corpusHeaders({
+                    'content-type': 'image/webp',
+                    'x-sha256': sha,
+                    'x-poap-event': eventId,
+                    etag: '"thumb-' + sha + '"',
+                });
+                if (req.method === 'HEAD') return new Response(null, { headers: th });
+                return new Response(t.body, { headers: th });
+            }
+
             const res = await corpusCached(env, ctx,
                 'blob/' + sha.slice(0, 2) + '/' + sha + '.' + ext, ct);
             if (!res) return json(404, { error: 'blob missing from corpus store' });
