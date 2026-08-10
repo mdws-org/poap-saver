@@ -74,7 +74,7 @@ person who archived it.
 ## The archive and its registry
 
 The whole of POAP is archived, not just the badges people saved through the
-tool: every event that existed when POAP shut down — 190,153 events, 174,498
+tool: every event that existed when POAP shut down — 197,577 events, 181,554
 unique artworks, all their metadata — crawled from POAP's own hosts in its
 final days, verified byte-for-byte against the SHA-256 of every file as
 served, and published to IPFS.
@@ -88,8 +88,8 @@ missing something and an id that never existed. `summary.json` carries the
 totals and two root CIDs that cover everything:
 
 ```
-all artwork (~157 GB):  bafybeiedeqc3ycrt5elg3vp2ad2c4p6hpj6afnhysbzb4pi2rhxlhi5x3a
-all metadata:           bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja
+all artwork (~194 GB):  bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i
+all metadata:           bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu
 ```
 
 Anyone holding these registry files plus any copy of the blocks can rebuild
@@ -107,8 +107,8 @@ root CIDs above are recursive pins, and re-running resumes an interrupted
 transfer:
 
 ```
-ipfs pin add bafybeiedeqc3ycrt5elg3vp2ad2c4p6hpj6afnhysbzb4pi2rhxlhi5x3a   # artwork, ~157 GB
-ipfs pin add bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja   # metadata
+ipfs pin add bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i   # artwork, ~194 GB
+ipfs pin add bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu   # metadata
 ```
 
 For subsets, [`scripts/pin-mirror.py`](scripts/) reads the registry and pins
@@ -119,7 +119,7 @@ what you choose:
 ./scripts/pin-mirror.py --archive poap-archive-you.eth/
                                                  # pin your own badges
 ./scripts/pin-mirror.py --events 4242,101250     # pin specific events
-./scripts/pin-mirror.py --all                    # pin all ~157 GB
+./scripts/pin-mirror.py --all                    # pin all ~194 GB
 ```
 
 It needs kubo and nothing else. Content arrives over IPFS itself, so

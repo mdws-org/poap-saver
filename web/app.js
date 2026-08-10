@@ -20,8 +20,8 @@
        metadata at META_ROOT/<eventId>.json, artwork at ART_ROOT/<eventId>.
        Names resolve through any public gateway, and the roots are pinned, so
        this keeps answering after every HTTP host in this file is gone. */
-    var META_ROOT = 'bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja';
-    var ART_ROOT = 'bafybeidnp33uoncjsbpq2255xg27eiapmcidog46d3hmaf6zon3qecfig4';
+    var META_ROOT = 'bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu';
+    var ART_ROOT = 'Qmcub76vVUS1vY9MsAw3XgRhpe85G5JMAAMvg6nnf8FLTw';
     var GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/'];
 
     /* Last tier: the complete archive out of S3-compatible object storage,
@@ -588,8 +588,9 @@
 
     /* ------------------------------------------- browse, modal, coverage --
        Results render as a browsable gallery, not just a zip: each card opens
-       a provenance modal (same shape as the poap-vault gallery). The modal
-       image is the rescued original - full resolution, already hash-checked. */
+       a provenance modal (same shape as the poap-vault gallery). Grid cards use
+       the archive's 400px thumbnails; the modal image is the rescued original -
+       full resolution, already hash-checked. */
 
     function escHtml(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -653,11 +654,32 @@
         var html = '';
         rows.forEach(function (p, i) {
             if (!p.preview) return;
+            /* Grid cards load the 400px archive thumbnail rather than the
+               rescued original. The original is already in memory and the
+               modal still shows it - but decoding a few hundred full-size
+               badges at once is what made this grid crawl. Events outside the
+               archive, and any thumbnail that misses, fall back to the
+               original via the error handler below. */
+            var thumb = p.e != null
+                ? MIRROR + '/corpus/thumb/' + p.e
+                : p.preview;
             html += '<button class="pv" type="button" data-i="' + i + '">' +
-                '<img loading="lazy" src="' + p.preview + '" alt="">' +
+                '<img loading="lazy" src="' + thumb + '" alt=""' +
+                ' data-full="' + p.preview + '">' +
                 '<span class="pv-n">' + escHtml(p.n) + '</span></button>';
         });
         el.innerHTML = html;
+        /* One-shot fallback: swap to the rescued bytes and clear data-full so a
+           broken original cannot loop. */
+        Array.prototype.forEach.call(el.querySelectorAll('img[data-full]'),
+            function (im) {
+                im.addEventListener('error', function () {
+                    var full = im.getAttribute('data-full');
+                    if (!full) return;
+                    im.removeAttribute('data-full');
+                    im.src = full;
+                });
+            });
         if (!el.dataset.wired) {
             el.dataset.wired = '1';
             el.addEventListener('click', function (e) {
