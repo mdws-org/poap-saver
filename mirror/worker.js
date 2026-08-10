@@ -41,7 +41,7 @@ const REGISTRY =
     'https://github.com/mdws-org/poap-saver/tree/main/registry/corpus';
 
 /* ------------------------------------------------------------------ corpus
- * The COMPLETE archive (every event, 190,153 of them) lives in a private
+ * The COMPLETE archive (every event, 197,577 of them) lives in a private
  * bucket of S3-compatible object storage, mirrored from the verified corpus.
  * This Worker is its only public face: it signs requests (SigV4), streams the
  * object through, and parks the response in Cloudflare's edge cache, so the
@@ -235,6 +235,41 @@ export default {
             });
             if (req.method === 'HEAD') return new Response(null, { headers: h });
             return new Response(res.body, { headers: h });
+        }
+
+        /* Animation derivatives. GIF has no modern interframe compression, so
+           the originals average 1.8 MB and are the slowest thing any reader
+           waits on. These are re-encodes: H.264 where the badge is opaque,
+           animated WebP where it genuinely uses transparency (H.264 has no
+           alpha and would matte it to a solid colour). The original GIF is
+           still served by /corpus/img/<eventId> and remains the preserved,
+           hash-verified artifact - this route is for playback only.
+
+           Format is discovered rather than guessed: try mp4, fall back to
+           webp, so the caller does not need to know which one a badge got. */
+        const anim = url.pathname.match(/^\/corpus\/anim\/(0|[1-9]\d{0,11})$/);
+        if (anim && (req.method === 'GET' || req.method === 'HEAD')) {
+            if (!env.CORPUS_KEY_ID || !env.CORPUS_APP_KEY) {
+                return json(503, { error: 'corpus tier not configured' });
+            }
+            const eventId = anim[1];
+            for (const [ext, ct] of [['mp4', 'video/mp4'], ['webp', 'image/webp']]) {
+                const res = await corpusCached(env, ctx,
+                    'anim/' + eventId + '.' + ext, ct);
+                if (!res) continue;
+                const h = corpusHeaders({
+                    'content-type': ct,
+                    'x-poap-event': eventId,
+                    'x-anim-format': ext,
+                    etag: '"anim-' + eventId + '-' + ext + '"',
+                });
+                if (req.method === 'HEAD') return new Response(null, { headers: h });
+                return new Response(res.body, { headers: h });
+            }
+            return json(404, {
+                error: 'no animation derivative for this event',
+                note: 'the original is at /corpus/img/<eventId>',
+            });
         }
 
         /* ------------------------------------------------ complete corpus */
