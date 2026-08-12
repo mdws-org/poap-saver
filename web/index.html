@@ -93,22 +93,24 @@ The roots, in case only this page survives:
 <code>bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu</code> (metadata).</p>
 <section class="mirror">
 <h2>Mirror it</h2>
-<p>The archive now sits in three places: S3-compatible object storage, and two
+<p>The archive sits in three places: S3-compatible object storage, and two
 IPFS nodes, one on a home connection and one in a datacenter. The metadata, 145
-MB and the part that cannot be rebuilt, is in four: both IPFS nodes, that object
-storage, and a second provider's bucket.</p>
-<p>That survives a dead disk. It does not survive someone losing interest. Every
+MB and the part that cannot be rebuilt, is in five - those three, a second
+storage provider's bucket, and a pin on a third party's IPFS cluster.</p>
+<p>That survives a dead disk. It does not survive someone losing interest. Nearly every
 copy above is run by one person, and archives end when that person stops paying
 attention, not usually when hardware fails.</p>
 <p>If you already run IPFS, one command changes it. Pin the metadata first:
-145 MB, all 197,577 events, and the only surviving copy of their names, dates
-and descriptions. The registry records every hash, but a hash is not a name.
-The artwork is 194 GB, so pin that when you have the disk.</p>
+145 MB, all 197,577 events, and the only copy of their names, dates and
+descriptions that does not depend on POAP's last server staying up. The
+registry records every hash, but a hash is not a name. The thumbnails are
+4.4 GB and keep the archive browsable, not just intact. The artwork is 194 GB,
+so pin that when you have the disk.</p>
 <pre><code>ipfs pin add bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu   # metadata, 145 MB
+ipfs pin add bafybeia3q5zqbjdhzdmdny3vzoc6gddjn4tsi22p6jd2lsx3rcm362gin4   # thumbnails, 4.4 GB
 ipfs pin add bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i   # artwork, 194 GB</code></pre>
 <p class="fine">Nothing here asks for money. The archive runs on a machine at
-home, its power and connection, a few dollars a month of object storage, and a
-domain. What it needs is other people holding copies, which costs nothing if
+home, a server, a few dollars a month of object storage, and a domain. What it needs is other people holding copies, which costs nothing if
 your node is already running.</p>
 </section>
 <p class="fine">An independent archive. Not affiliated with POAP.</p>
