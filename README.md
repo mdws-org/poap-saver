@@ -81,8 +81,8 @@ served, and published to IPFS.
 
 [`registry/corpus/`](registry/corpus/) is the permanent map. One row per
 event: the artwork's SHA-256 as POAP served it, the artwork's IPFS CID, the
-metadata's CID, and the original URLs. `gaps.jsonl` lists the 3,847 ids in
-the 1–194,000 space that had nothing to save — recorded with their reason
+metadata's CID, and the original URLs. `gaps.jsonl` lists the 42,423 ids in
+the 1–240,000 space that had nothing to save — recorded with their reason
 while POAP still answered, which is the difference between an archive that is
 missing something and an id that never existed. `summary.json` carries the
 totals and two root CIDs that cover everything:

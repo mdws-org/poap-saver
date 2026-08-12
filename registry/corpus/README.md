@@ -1,7 +1,7 @@
 # The POAP archive registry
 
-Every POAP event that existed when POAP shut down in August 2026: 190,153
-events, 174,498 unique artworks, and all their metadata, crawled from POAP's
+Every POAP event that existed when POAP shut down in August 2026: 197,577
+events, 181,554 unique artworks, and all their metadata, crawled from POAP's
 own hosts in their final days and verified byte-for-byte against the SHA-256
 of every file as served. The tokens are permanent; this is the layer they
 point at, which was not.
@@ -50,7 +50,7 @@ root:
   SHA-256 exactly as POAP served it, the artwork's CID, the metadata's CID,
   the size and content type, and the original `assets.poap.xyz` /
   `api.poap.tech` URLs. Sharded 10,000 event ids per file.
-- `gaps.jsonl` — the 3,847 ids in the 1–194,000 space that had nothing to
+- `gaps.jsonl` — the 42,423 ids in the 1–240,000 space that had nothing to
   save, each with the reason observed while POAP still answered. This is what
   lets the archive claim completeness: an id is either in the registry or in
   here, never silently absent.
