@@ -12,8 +12,21 @@ Two commands, with [kubo](https://docs.ipfs.tech/install/) installed and
 `ipfs daemon` running:
 
 ```
-ipfs pin add bafybeiedeqc3ycrt5elg3vp2ad2c4p6hpj6afnhysbzb4pi2rhxlhi5x3a   # all artwork, ~157 GB
-ipfs pin add bafybeia7stlx5b3g7u2nv5lctjvkb7auo3x2l2t3grzuoffaxm66lau6ja   # all metadata, ~1 GB
+ipfs pin add bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i   # all artwork, ~194 GB
+ipfs pin add bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu   # all metadata, 145 MB
+```
+
+The earlier roots (`bafybeiedeqc3…` artwork, `bafybeia7stlx…` metadata) still
+resolve; they are simply the archive before the 7,424 events recovered from
+above id 194,000 were added. Pin the roots above.
+
+Two derivative trees exist for anyone who wants the archive browsable, not
+just intact. Both regenerate from the artwork, so they matter less than the
+roots above - but a mirror that serves readers wants them:
+
+```
+ipfs pin add bafybeia3q5zqbjdhzdmdny3vzoc6gddjn4tsi22p6jd2lsx3rcm362gin4   # 400px thumbnails, 4.4 GB
+ipfs pin add bafybeibwodt254seymig7cbemxwgj4e5lztui3ccz6ypboafyl5i2ptn4a   # animation re-encodes, 47 MB
 ```
 
 That is the entire archive. The transfer takes a while and is safe to
