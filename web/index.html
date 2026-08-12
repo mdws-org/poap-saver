@@ -93,9 +93,12 @@ The roots, in case only this page survives:
 <code>bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu</code> (metadata).</p>
 <section class="mirror">
 <h2>Mirror it</h2>
-<p>One node serves this archive today - a machine on a home connection. Every
-content address on this page resolves because that machine is awake. For
-something meant to outlive the company that shut down, that is thin.</p>
+<p>The archive now sits in three places: S3-compatible object storage, and two
+IPFS nodes, one on a home connection and one in a datacenter. The metadata is
+held in more than that, because it is the part that cannot be rebuilt.</p>
+<p>That survives a dead disk. It does not survive someone losing interest. Every
+copy above is run by one person, and archives end when that person stops paying
+attention, not usually when hardware fails.</p>
 <p>If you already run IPFS, one command changes it. Pin the metadata first:
 145 MB, all 197,577 events, and the only surviving copy of their names, dates
 and descriptions. The registry records every hash, but a hash is not a name.
