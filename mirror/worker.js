@@ -128,6 +128,41 @@ async function corpusFetch(env, key) {
  * hold something it does hold, which is the one thing this project cannot get
  * wrong. Observed for real on 2026-08-10, when the store briefly throttled
  * right after a bulk upload and events that exist returned "not in corpus". */
+/* The same trees exist on IPFS, pinned on two nodes, so a key that the store
+ * cannot serve right now can usually be read from a public gateway instead.
+ * Only cindex/ remains store-only - it is a lookup structure, not content. */
+const IPFS_ROOTS = {
+    blob: 'bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i',
+    meta: 'bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu',
+    thumb: 'bafybeia3q5zqbjdhzdmdny3vzoc6gddjn4tsi22p6jd2lsx3rcm362gin4',
+    anim: 'bafybeibwodt254seymig7cbemxwgj4e5lztui3ccz6ypboafyl5i2ptn4a',
+};
+const IPFS_GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/'];
+
+async function corpusFromIpfs(key, contentType) {
+    const slash = key.indexOf('/');
+    const root = IPFS_ROOTS[key.slice(0, slash)];
+    if (!root || root.indexOf('PENDING') !== -1) return false;
+    const rest = key.slice(slash + 1);
+    for (const gw of IPFS_GATEWAYS) {
+        try {
+            const up = await fetch(gw + root + '/' + rest, {
+                signal: AbortSignal.timeout(25000),
+                headers: { 'user-agent': 'poap-mirror-fallback/1.0' },
+            });
+            if (!up.ok) continue;       // cold-content 504s are routine; try the next
+            return new Response(await up.arrayBuffer(), {
+                headers: {
+                    'content-type': contentType,
+                    'cache-control': 'public, max-age=31536000, immutable',
+                    'x-served-via': 'ipfs-fallback',
+                },
+            });
+        } catch (e) { /* timeout or network - try the next gateway */ }
+    }
+    return false;
+}
+
 async function corpusCached(env, ctx, key, contentType) {
     const cacheKey = 'https://corpus-cache.invalid/' + key;
     const hit = await caches.default.match(cacheKey);
@@ -136,10 +171,17 @@ async function corpusCached(env, ctx, key, contentType) {
     try {
         up = await corpusFetch(env, key);
     } catch (e) {
-        return false;                       // network/DNS/TLS - never a miss
+        up = null;                          // network/DNS/TLS - treat as down
     }
-    if (!up.ok) {
-        return up.status === 404 ? null : false;
+    if (!up || !up.ok) {
+        if (up && up.status === 404) return null;   // genuinely absent everywhere
+        /* The store could not answer - a tripped download cap, a throttle, an
+         * outage. The content is immutable and pinned on IPFS, so read it from
+         * a gateway and cache it exactly as if the store had served it. */
+        const alt = await corpusFromIpfs(key, contentType);
+        if (alt === false) return false;
+        ctx.waitUntil(caches.default.put(cacheKey, alt.clone()));
+        return alt;
     }
     const res = new Response(await up.arrayBuffer(), {
         headers: {
