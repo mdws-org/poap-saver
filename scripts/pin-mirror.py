@@ -9,7 +9,7 @@ for it, is still around.
 There are two sources to pin from, and they differ in what they cover:
 
 The REGISTRY (default) covers the whole archive: every POAP event that
-existed when POAP shut down, 190,153 events and 174,498 unique artworks.
+existed when POAP shut down, 197,577 events and 181,554 unique artworks.
 It lives in this repository under registry/corpus/ and maps each event to
 the CID of its artwork and its metadata. Content is fetched over IPFS
 itself, so integrity needs no extra checking - a block that does not hash
@@ -21,7 +21,7 @@ prove nothing, so this mode re-hashes everything locally and refuses
 mismatches. It remains for completeness; the registry supersedes it.
 
 Pinning the entire archive is a real commitment (see summary.json - the
-artwork alone is ~157 GB), so you choose what to pin:
+artwork alone is ~194 GB), so you choose what to pin:
 
     ./scripts/pin-mirror.py                          # show what's available
     ./scripts/pin-mirror.py --archive poap-archive-you.eth/
