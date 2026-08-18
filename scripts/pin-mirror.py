@@ -99,7 +99,9 @@ class Conn:
         if q:
             path += "?" + q
         last = None
-        for attempt in range(tries):
+        throttled = 0
+        attempt = 0
+        while attempt < tries:
             try:
                 if self.c is None:
                     self.c = self._connect()
@@ -109,18 +111,30 @@ class Conn:
                 body = r.read()
                 if r.status == 404:
                     return 404, b""
+                if r.status == 429 and throttled < 30:
+                    # The mirror pacing us, not a failure: wait what it asks
+                    # (60 s by default) and try again. Waits are counted apart
+                    # from the failure retries so pacing cannot exhaust them;
+                    # 30 waits (~half an hour) is the give-up point. Whole-
+                    # archive pinning should not come this way at all -
+                    # `ipfs pin add` on the registry roots is the bulk path.
+                    throttled += 1
+                    wait = r.getheader("retry-after")
+                    time.sleep(int(wait) if wait and wait.isdigit() else 60)
+                    continue
                 if r.status != 200:
                     raise RuntimeError(f"HTTP {r.status}")
                 return 200, body
             except Exception as e:  # noqa: BLE001 - retried, then reported
                 last = e
+                attempt += 1
                 try:
                     self.c.close()
                 except Exception:  # noqa: BLE001 - already broken
                     pass
                 self.c = None
-                if attempt + 1 < tries:
-                    time.sleep(4 * (attempt + 1))
+                if attempt < tries:
+                    time.sleep(4 * attempt)
         raise SystemExit(f"GET {url} failed after {tries} tries: {last}")
 
 

@@ -214,10 +214,10 @@ function corpusHeaders(extra) {
     };
 }
 
-function json(status, obj) {
+function json(status, obj, extra) {
     return new Response(JSON.stringify(obj, null, 2), {
         status,
-        headers: { 'content-type': 'application/json', ...CORS },
+        headers: { 'content-type': 'application/json', ...CORS, ...(extra || {}) },
     });
 }
 
@@ -268,6 +268,22 @@ export default {
         const url = new URL(req.url);
         if (req.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: CORS });
+        }
+
+        // Bulk-read guard (READ_LIMIT in wrangler.toml), keyed by client IP.
+        // The root document, /events and /cids stay unmetered: they are the
+        // pointers to the bulk paths, not the bulk itself. Absent binding
+        // (older deploys, local dev) means no limit rather than a crash.
+        if (env.READ_LIMIT && (req.method === 'GET' || req.method === 'HEAD') &&
+            /^\/(corpus|ipfs|img)\//.test(url.pathname)) {
+            const key = req.headers.get('cf-connecting-ip') || 'unknown';
+            const { success } = await env.READ_LIMIT.limit({ key });
+            if (!success) {
+                return json(429, {
+                    error: 'rate limited: 60 requests per minute per client on archive paths',
+                    bulk: 'pin the IPFS roots (registry/corpus/README.md) or use the data host',
+                }, { 'retry-after': '60' });
+            }
         }
 
         if (url.pathname === '/' || url.pathname === '') {
