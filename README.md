@@ -186,6 +186,11 @@ curl -s https://poap-mirror.bemeadows.workers.dev/cids     # every CID it holds
 
 Both are cursor-paginated: follow `cursor` while `truncated` is true.
 
+The HTTP mirror answers 60 requests a minute per client. It serves one badge
+at a time. To hold the whole archive, pin the registry root CIDs in
+`registry/corpus/README.md`. Past the limit the mirror returns 429 with a
+`Retry-After` header. `pin-mirror.py` waits it out.
+
 The mirror's objects can also be pinned the legacy way —
 `./scripts/pin-mirror.py --mirror` fetches each object over HTTP, re-hashes it
 locally, and refuses any mismatch. The registry above supersedes this: it

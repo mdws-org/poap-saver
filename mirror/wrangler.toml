@@ -18,6 +18,17 @@ name = "INGEST_LIMIT"
 namespace_id = "1001"
 simple = { limit = 300, period = 60 }
 
+# Per-IP read limit on the archive paths (/corpus/*, /ipfs/*, /img/*). The
+# Worker is a per-badge read path, not a bulk source: whole-archive work goes
+# to the IPFS roots (registry/corpus/README.md) or the data host. 60/min holds
+# any one client under ~86k requests/day, below the account-wide free-plan cap
+# that a 197k-request pull tripped on 2026-08-18 - taking two unrelated
+# Workers on the same account down with it for the rest of the day.
+[[ratelimits]]
+name = "READ_LIMIT"
+namespace_id = "1002"
+simple = { limit = 60, period = 60 }
+
 # Daily reconciliation of the usage ledger against the real bucket listing.
 [triggers]
 crons = ["17 4 * * *"]
