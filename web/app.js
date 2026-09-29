@@ -22,7 +22,7 @@
        this keeps answering after every HTTP host in this file is gone. */
     var META_ROOT = 'bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu';
     var ART_ROOT = 'Qmcub76vVUS1vY9MsAw3XgRhpe85G5JMAAMvg6nnf8FLTw';
-    var GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/'];
+    var GATEWAYS = ['https://vps3.mdws.me/ipfs/', 'https://ipfs.filebase.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/'];
 
     /* Last tier: the complete archive out of S3-compatible object storage,
        behind the same Worker. Tried after POAP, the mirror, and IPFS. */
@@ -636,7 +636,7 @@
                 escHtml(p.src) + '</span></div>' : '') +
             '<div><b>sha256</b> ' + escHtml(p.sha || 'n/a') + '</div>' +
             (p.e != null
-                ? '<div><b>archived image (IPFS)</b> <a href="https://ipfs.io/ipfs/' +
+                ? '<div><b>archived image (IPFS)</b> <a href="https://vps3.mdws.me/ipfs/' +
                   ART_ROOT + '/' + p.e + '" target="_blank" rel="noopener">' +
                   ART_ROOT.slice(0, 14) + '&hellip;/' + p.e + '</a></div>'
                 : '') +

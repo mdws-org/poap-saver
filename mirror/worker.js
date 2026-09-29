@@ -13,6 +13,7 @@
  *   POST /recount           (admin) rebuild the usage ledger from the bucket
  *   POST /cid               (admin) record the CID of an event's object
  *   DELETE /img/<eventId>   (admin) remove a poisoned object
+ *   GET  /speaking/<slug>.opus   talk audio for thebenmeadows.com/speaking/
  *
  * Ingest is retired. While POAP's origin answered, POST /ingest let any rescue
  * extend the mirror, with the artwork-to-event binding proven against POAP's
@@ -137,7 +138,61 @@ const IPFS_ROOTS = {
     thumb: 'bafybeia3q5zqbjdhzdmdny3vzoc6gddjn4tsi22p6jd2lsx3rcm362gin4',
     anim: 'bafybeibwodt254seymig7cbemxwgj4e5lztui3ccz6ypboafyl5i2ptn4a',
 };
-const IPFS_GATEWAYS = ['https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/'];
+/* First the gateway on vps3, a node that pins these roots and answers only for
+ * them; then two public gateways. ipfs.io and dweb.link closed to non-browser
+ * clients on 2026-09-21 (429 with a Sunset header), so they are not listed. */
+const IPFS_GATEWAYS = [
+    'https://vps3.mdws.me/ipfs/',
+    'https://ipfs.filebase.io/ipfs/',
+    'https://gateway.pinata.cloud/ipfs/',
+];
+
+/* ---------------------------------------------------------------- speaking
+ * Audio for the talk transcripts at thebenmeadows.com/speaking/. The files
+ * live in one IPFS directory (audio/<slug>.opus under SPEAKING_ROOT), pinned on
+ * two nodes; this route is an HTTP way in for players that cannot speak IPFS.
+ *
+ *   GET /speaking/<slug>.opus   streamed from the first gateway that answers,
+ *                               Range requests passed through so players seek
+ *
+ * Only names under the one root are served, so this is not an open gateway. */
+const SPEAKING_ROOT = 'bafybeie4uhgbv36g7u7qhljmhwptcr4jcc66e5vjd2veww427buww26h7q';
+const SPEAKING_PASS = ['content-type', 'content-length', 'content-range',
+                       'accept-ranges', 'etag', 'last-modified'];
+
+async function speakingAudio(req, name) {
+    const fwd = { 'user-agent': 'poap-mirror-speaking/1.0' };
+    const range = req.headers.get('range');
+    if (range) fwd.range = range;
+    for (const gw of IPFS_GATEWAYS) {
+        try {
+            const up = await fetch(gw + SPEAKING_ROOT + '/audio/' + name, {
+                method: req.method,
+                headers: fwd,
+                signal: AbortSignal.timeout(20000),
+            });
+            if (up.status !== 200 && up.status !== 206) continue;
+            const h = new Headers({
+                'cache-control': 'public, max-age=31536000, immutable',
+                'x-content-type-options': 'nosniff',
+                'content-security-policy': "default-src 'none'; sandbox",
+                'x-ipfs-path': '/ipfs/' + SPEAKING_ROOT + '/audio/' + name,
+                ...CORS,
+            });
+            for (const k of SPEAKING_PASS) {
+                const v = up.headers.get(k);
+                if (v) h.set(k, v);
+            }
+            h.set('content-type', 'audio/ogg');
+            return new Response(req.method === 'HEAD' ? null : up.body,
+                                { status: up.status, headers: h });
+        } catch (e) { /* timeout or network - try the next gateway */ }
+    }
+    return json(502, {
+        error: 'no gateway returned this recording',
+        ipfs: 'ipfs://' + SPEAKING_ROOT + '/audio/' + name,
+    });
+}
 
 async function corpusFromIpfs(key, contentType) {
     const slash = key.indexOf('/');
@@ -275,7 +330,7 @@ export default {
         // pointers to the bulk paths, not the bulk itself. Absent binding
         // (older deploys, local dev) means no limit rather than a crash.
         if (env.READ_LIMIT && (req.method === 'GET' || req.method === 'HEAD') &&
-            /^\/(corpus|ipfs|img)\//.test(url.pathname)) {
+            /^\/(corpus|ipfs|img|speaking)\//.test(url.pathname)) {
             const key = req.headers.get('cf-connecting-ip') || 'unknown';
             const { success } = await env.READ_LIMIT.limit({ key });
             if (!success) {
@@ -290,7 +345,7 @@ export default {
             const u = await usage(env);
             return json(200, {
                 what: 'poap-mirror: read-only archive of POAP artwork saved through the rescue tool',
-                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /corpus/img/<eventId>; GET /corpus/meta/<eventId>; GET /corpus/thumb/<eventId>; GET /corpus/anim/<eventId>; GET /events; GET /cids',
+                keys: 'GET /img/<eventId>; GET /ipfs/<cid>; GET /corpus/img/<eventId>; GET /corpus/meta/<eventId>; GET /corpus/thumb/<eventId>; GET /corpus/anim/<eventId>; GET /events; GET /cids; GET /speaking/<slug>.opus',
                 writes: 'retired - the full corpus is archived and on IPFS',
                 corpus: 'complete archive of every POAP event, served from S3-compatible object storage',
                 events: u.objects,
@@ -298,6 +353,11 @@ export default {
                 registry: REGISTRY,
                 source: 'https://github.com/mdws-org/poap-saver',
             });
+        }
+
+        const talk = url.pathname.match(/^\/speaking\/([0-9]{4}-[0-9]{2}-[0-9]{2}_[a-z0-9-]{1,80}\.opus)$/);
+        if (talk && (req.method === 'GET' || req.method === 'HEAD')) {
+            return speakingAudio(req, talk[1]);
         }
 
         /* Membership index, one shard per 1000 events: lets a page answer
