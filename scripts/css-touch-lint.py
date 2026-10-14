@@ -45,14 +45,18 @@ RULES = {
     "INPUT": "input/select/textarea font-size under 16px makes iOS Safari zoom on focus",
 }
 
-HOVER_QUERY = re.compile(r"hover\s*:\s*hover")
-OUTLINE_DECL = re.compile(r"(?<![\w-])outline\s*:\s*(none|0(px)?)\s*(!important)?\s*(;|$)", re.I)
-FONT_SIZE_DECL = re.compile(r"(?<![\w-])font-size\s*:\s*([\d.]+)\s*(px|rem|em|pt)\b", re.I)
+HOVER_FEATURE = re.compile(r"(?<![\w-])hover\s*:\s*hover\b", re.I)
+HOVER_SEL = re.compile(r":hover\b", re.I)
+NOT_FOCUS_VISIBLE = re.compile(r":not\(\s*:focus-visible\s*\)", re.I)
+ZERO_LENGTH = re.compile(r"[+-]?0*\.?0+([a-z]+)?", re.I)
+FONT_SIZE_DECL = re.compile(r"(?<![\w-])font-size\s*:\s*(\d*\.?\d+)\s*(px|rem|em|pt)\b", re.I)
 FORM_CONTROL = re.compile(r"(^|[\s>+~,(])(input|select|textarea)(?![\w-])", re.I)
-INVALID_SEL = re.compile(r"(?<!user-):invalid\b")
+PAREN_GROUP = re.compile(r"\([^()]*\)")
+INVALID_SEL = re.compile(r"(?<!user-):invalid\b", re.I)
 STYLE_BLOCK = re.compile(r"<style\b[^>]*>(.*?)</style>", re.I | re.S)
-OUTLINE_CLASS = re.compile(r"\bclass\s*=\s*([\"'])([^\"']*)\1", re.I)
+CLASS_ATTR = re.compile(r"\b(?:class|className)\s*=\s*([\"'])([^\"']*)\1", re.I)
 INLINE_CONTROL = re.compile(r"<(input|select|textarea)\b[^>]*\bstyle\s*=\s*([\"'])([^\"']*)\2", re.I)
+TAILWIND_HOVER_ON = re.compile(r"\bhoverOnlyWhenSupported[\"']?\s*:\s*true\b")
 
 
 class Finding:
@@ -71,20 +75,56 @@ def allowed(lines, line_no):
     return False
 
 
-def blank_comments(css):
-    """Replace comment bodies with spaces, keeping every newline so line numbers hold."""
-    out = []
-    i, n = 0, len(css)
+def blank_comments_and_strings(src, js=False):
+    """Blank comment bodies and the inside of quoted strings, keeping every newline.
+
+    A brace, semicolon or `/*` inside a string is then never mistaken for syntax.
+    With js=True, `//` line comments are blanked too and strings are kept
+    (a config key may be quoted), only skipped over.
+    """
+    out = list(src)
+    quotes = "\"'`" if js else "\"'"
+    i, n = 0, len(src)
     while i < n:
-        if css.startswith("/*", i):
-            end = css.find("*/", i + 2)
+        if src.startswith("/*", i):
+            end = src.find("*/", i + 2)
             end = n if end < 0 else end + 2
-            out.append("".join("\n" if c == "\n" else " " for c in css[i:end]))
+            _blank(out, i, end)
+            i = end
+        elif js and src.startswith("//", i):
+            end = src.find("\n", i)
+            end = n if end < 0 else end
+            _blank(out, i, end)
+            i = end
+        elif src[i] in quotes:
+            end = _string_end(src, i)
+            if not js:
+                _blank(out, i + 1, end - 1)
             i = end
         else:
-            out.append(css[i])
             i += 1
     return "".join(out)
+
+
+def _string_end(css, i):
+    """Index just past the string that opens at i (end of line or file if unclosed)."""
+    quote, j, n = css[i], i + 1, len(css)
+    while j < n:
+        if css[j] == "\\":
+            j += 2
+        elif css[j] == quote:
+            return j + 1
+        elif css[j] == "\n":
+            return j
+        else:
+            j += 1
+    return n
+
+
+def _blank(out, start, end):
+    for k in range(start, min(end, len(out))):
+        if out[k] != "\n":
+            out[k] = " "
 
 
 def too_small(value, unit):
@@ -92,55 +132,90 @@ def too_small(value, unit):
     return {"px": size < 16, "rem": size < 1, "em": size < 1, "pt": size < 12}[unit.lower()]
 
 
+def media_requires_hover(prelude):
+    """True when every comma branch of an @media query demands a hover-capable pointer."""
+    if not prelude.lower().startswith("@media"):
+        return False
+    branches = prelude[len("@media"):].split(",")
+    return all(HOVER_FEATURE.search(b) and not re.match(r"\s*not\b", b, re.I) for b in branches)
+
+
 def walk_rules(css):
     """Yield (selector, declarations, line, hover_ok) for every style rule in css.
 
-    Blocks are tracked with a stack; an at-rule block contributes its query to
-    the context, a style rule's declarations exclude any nested blocks.
+    Blocks are tracked with a stack. A `;` outside parentheses ends a statement:
+    a brace-less at-rule (@import) is dropped, a declaration joins its rule, so
+    a nested rule's prelude is only the text since the last `;`, `{` or `}`.
     """
-    text = blank_comments(css)
-    stack = []  # entries: dict(prelude, is_at, hover_ok, decl_parts, line)
-    start = 0
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "{":
-            prelude = text[start:i].strip()
-            line = text.count("\n", 0, start) + 1 + _leading_newlines(text[start:i])
-            is_at = prelude.startswith("@")
-            parent_ok = stack[-1]["hover_ok"] if stack else False
-            hover_ok = parent_ok or (is_at and bool(HOVER_QUERY.search(prelude)))
-            stack.append({"prelude": prelude, "is_at": is_at, "hover_ok": hover_ok, "decl": [], "line": line})
+    text = blank_comments_and_strings(css)
+    stack = []  # entries: dict(prelude, is_at, hover_ok, decl, line)
+    start, depth = 0, 0
+    for i, c in enumerate(text):
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth = max(depth - 1, 0)
+        elif c == ";" and depth == 0:
+            if stack and not stack[-1]["is_at"]:
+                stack[-1]["decl"].append(text[start:i])
             start = i + 1
+        elif c == "{":
+            stack.append(_open_block(text, start, i, stack))
+            start, depth = i + 1, 0
         elif c == "}":
             if stack:
                 entry = stack.pop()
                 entry["decl"].append(text[start:i])
                 if not entry["is_at"]:
-                    yield entry["prelude"], " ".join(entry["decl"]), entry["line"], entry["hover_ok"]
-            start = i + 1
-        elif c == ";" and stack and not stack[-1]["is_at"]:
-            pass
-        i += 1
+                    yield entry["prelude"], ";".join(entry["decl"]), entry["line"], entry["hover_ok"]
+            start, depth = i + 1, 0
 
 
-def _leading_newlines(s):
-    return len(s) - len(s.lstrip("\n")) if s.startswith("\n") else 0
+def _open_block(text, start, brace, stack):
+    raw = text[start:brace]
+    prelude = raw.strip()
+    first = start + (len(raw) - len(raw.lstrip()))
+    is_at = prelude.startswith("@")
+    parent_ok = stack[-1]["hover_ok"] if stack else False
+    return {"prelude": prelude, "is_at": is_at, "hover_ok": parent_ok or (is_at and media_requires_hover(prelude)),
+            "decl": [], "line": line_of(text, first)}
 
 
-def nested_block_free(decls):
-    """Strip any nested `{...}` so declarations of a parent rule read cleanly."""
-    return re.sub(r"\{[^{}]*\}", " ", decls)
+def is_outline_utility(token):
+    """True for Tailwind's outline-none, with any variant prefix or important mark."""
+    return token.rsplit(":", 1)[-1].strip("!") == "outline-none"
+
+
+def top_level(value):
+    """A declaration value with every parenthesised group removed, so rgb(0 0 0) is not read as widths."""
+    prev = None
+    while prev != value:
+        prev, value = value, PAREN_GROUP.sub(" ", value)
+    return value
+
+
+def removes_outline(decls):
+    """True when a declaration list sets the outline to none or a zero width."""
+    for decl in decls.split(";"):
+        prop, _, value = decl.partition(":")
+        prop = prop.strip().lower()
+        tokens = top_level(value).lower().replace("!important", " ").split()
+        if prop == "outline" and any(t == "none" or ZERO_LENGTH.fullmatch(t) for t in tokens):
+            return True
+        if prop == "outline-style" and "none" in tokens:
+            return True
+        if prop.startswith("@apply") and any(is_outline_utility(t) for t in decl.split()[1:]):
+            return True
+    return False
 
 
 def lint_css(path, css, lines, offset=0):
     found = []
     for selector, decls, line, hover_ok in walk_rules(css):
         line += offset
-        decls = nested_block_free(decls)
-        if ":hover" in selector and not hover_ok:
+        if HOVER_SEL.search(selector) and not hover_ok:
             found.append(Finding(path, line, "HOVER", f"`{short(selector)}`"))
-        if OUTLINE_DECL.search(decls) and ":not(:focus-visible)" not in selector:
+        if removes_outline(decls) and not NOT_FOCUS_VISIBLE.search(selector):
             found.append(Finding(path, line, "OUTLINE", f"`{short(selector)}` removes the focus ring"))
         if INVALID_SEL.search(selector):
             found.append(Finding(path, line, "INVALID", f"`{short(selector)}`"))
@@ -159,9 +234,10 @@ def short(selector):
 def lint_markup(path, text, lines):
     """Checks on the markup itself: outline-none utilities and inline input sizes."""
     found = []
-    for m in OUTLINE_CLASS.finditer(text):
-        if re.search(r"(^|\s)outline-none(\s|$)", m.group(2)):
-            found.append(Finding(path, line_of(text, m.start()), "OUTLINE", "class outline-none"))
+    for m in CLASS_ATTR.finditer(text):
+        for token in m.group(2).split():
+            if is_outline_utility(token):
+                found.append(Finding(path, line_of(text, m.start()), "OUTLINE", f"class {token}"))
     for m in INLINE_CONTROL.finditer(text):
         for fs in FONT_SIZE_DECL.finditer(m.group(3)):
             if too_small(fs.group(1), fs.group(2)):
@@ -182,7 +258,8 @@ def lint_file(path):
     lines = text.split("\n")
     name = os.path.basename(path)
     if name.startswith("tailwind.config."):
-        return [] if "hoverOnlyWhenSupported" in text else [Finding(path, 1, "TAILWIND", "add future: { hoverOnlyWhenSupported: true }")]
+        on = TAILWIND_HOVER_ON.search(blank_comments_and_strings(text, js=True))
+        return [] if on else [Finding(path, 1, "TAILWIND", "add future: { hoverOnlyWhenSupported: true }")]
     ext = os.path.splitext(name)[1].lower()
     if ext == ".css":
         return lint_css(path, text, lines)
@@ -244,6 +321,10 @@ def main(argv=None):
     if args.checksum:
         print(self_checksum())
         return 0
+    missing = [p for p in args.paths if not os.path.exists(p)]
+    if missing:
+        print(f"css-touch-lint: no such path: {', '.join(missing)}", file=sys.stderr)
+        return 2
     findings = []
     for path in collect(args.paths, DEFAULT_EXCLUDE_FILES + args.exclude):
         findings.extend(lint_file(path))
