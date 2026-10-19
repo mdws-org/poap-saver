@@ -22,10 +22,12 @@ Requires Python 3.9+. No dependencies.
 import argparse
 import hashlib
 import http.client
+import ipaddress
 import json
 import mimetypes
 import os
 import re
+import socket
 import sys
 import time
 import urllib.parse
@@ -210,12 +212,54 @@ def enumerate_tokens(chain, addr):
 _CONNS = {}
 
 
+# Metadata and image URLs come from whoever made each event, so a URL (or a
+# redirect) can name loopback, the LAN or a cloud metadata address. Each
+# connection resolves its host once, refuses any address that is not public,
+# and connects to the address it checked.
+class Refused(Exception):
+    """A URL this tool will not fetch. Retrying cannot change the answer."""
+
+
+def _public_addrs(host, port):
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as e:
+        raise RuntimeError(f"{host}: {e}") from None
+    addrs = list(dict.fromkeys(sa[0] for *_, sa in infos))
+    for a in addrs:
+        ip = ipaddress.ip_address(a.split("%")[0])
+        if not ip.is_global or ip.is_multicast:
+            raise Refused(f"refusing {host}: it resolves to {ip}, which is not a public address")
+    return addrs
+
+
+def _connect_any(addrs, port, timeout):
+    err = OSError("no address to connect to")
+    for a in addrs:
+        try:
+            return socket.create_connection((a, port), timeout)
+        except OSError as e:
+            err = e
+    raise err
+
+
+class _PinnedHTTP(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = _connect_any(self._addrs, self.port, self.timeout)
+
+
+class _PinnedHTTPS(http.client.HTTPSConnection):
+    def connect(self):
+        sock = _connect_any(self._addrs, self.port, self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
 def _conn(scheme, host):
     key = (scheme, host)
     if key not in _CONNS:
-        cls = (http.client.HTTPConnection if scheme == "http"
-               else http.client.HTTPSConnection)
-        _CONNS[key] = cls(host, timeout=45)
+        c = (_PinnedHTTP if scheme == "http" else _PinnedHTTPS)(host, timeout=45)
+        c._addrs = _public_addrs(c.host, c.port)
+        _CONNS[key] = c
     return _CONNS[key]
 
 
@@ -228,6 +272,8 @@ def _drop(scheme, host):
 
 def fetch(url, binary=False, _depth=0, tries=3):
     p = urllib.parse.urlparse(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        raise Refused(f"refusing {url[:80]}: only http and https URLs are fetched")
     path = p.path + ("?" + p.query if p.query else "")
     last = None
     for attempt in range(tries):
@@ -243,8 +289,10 @@ def fetch(url, binary=False, _depth=0, tries=3):
                 if loc:
                     if _depth >= 5:
                         raise RuntimeError("too many redirects")
-                    return fetch(urllib.parse.urljoin(url, loc), binary,
-                                 _depth + 1, tries)
+                    nxt = urllib.parse.urljoin(url, loc)
+                    if p.scheme == "https" and urllib.parse.urlparse(nxt).scheme != "https":
+                        raise Refused(f"refusing a redirect from https to {nxt[:80]}")
+                    return fetch(nxt, binary, _depth + 1, tries)
             if r.status == 429 or r.status >= 500:
                 _drop(p.scheme, p.netloc)
                 last = RuntimeError(f"HTTP {r.status}")
@@ -255,6 +303,8 @@ def fetch(url, binary=False, _depth=0, tries=3):
             if r.status != 200:
                 raise RuntimeError(f"HTTP {r.status}")
             return (data, ctype) if binary else (json.loads(data), ctype)
+        except Refused:
+            raise
         except Exception as e:  # noqa: BLE001
             last = e
             _drop(p.scheme, p.netloc)
