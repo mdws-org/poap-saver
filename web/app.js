@@ -393,7 +393,7 @@
             var row = {
                 c: tok.chain, t: String(tok.id), e: eventIdFrom(tok.uri),
                 n: meta.name || 'POAP', d: (meta.description || '').trim(),
-                y: meta.year || null, img: null, sha: null,
+                y: Number(meta.year) || null, img: null, sha: null,
                 uri: tok.uri, src: imgUrl || null,
             };
             rows.push(row);
@@ -528,22 +528,9 @@
                     rows.forEach(function (p) {
                         if (p.preview) stalePreviews.push(p.preview);
                     });
-                    /* preview holds page-lifetime blob: URLs - meaningless
-                       inside the archive, so strip before serializing. */
-                    var clean = rows.map(function (p) {
-                        var c = {}, k;
-                        for (k in p) if (k !== 'preview') c[k] = p[k];
-                        return c;
-                    });
-                    /* "</" must not appear inside the gallery's inline
-                       <script>: metadata is third-party text and "</script>"
-                       in it would end the element. Function replacement also
-                       keeps $-patterns in metadata literal. */
-                    var data = JSON.stringify(clean).replace(/<\//g, '<\\/');
-                    var gallery = tpl
-                        .replace(/__ADDRESS__/g, address)
-                        .replace(/__COUNT__/g, String(clean.length))
-                        .replace('__DATA__', function () { return data; });
+                    var filled = window.poapGallery(tpl, address, rows);
+                    var clean = filled.clean;
+                    var gallery = filled.html;
                     files.push({ name: 'index.html',
                                  data: new TextEncoder().encode(gallery) });
                     files.push({ name: 'manifest.json',
