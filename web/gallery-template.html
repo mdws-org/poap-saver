@@ -65,9 +65,9 @@ var year = null;
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 
 var years = [];
-DATA.forEach(function(p){ if(p.y && years.indexOf(p.y)===-1) years.push(p.y); });
+DATA.forEach(function(p){ var y = Number(p.y); if(y && years.indexOf(y)===-1) years.push(y); });
 years.sort(function(a,b){return b-a;});
-yearsEl.innerHTML = years.map(function(y){return '<button class="chip" data-y="'+y+'">'+y+'</button>';}).join(' ');
+yearsEl.innerHTML = years.map(function(y){return '<button class="chip" data-y="'+esc(y)+'">'+esc(y)+'</button>';}).join(' ');
 yearsEl.addEventListener('click', function(e){
   var b = e.target.closest('.chip'); if(!b) return;
   var y = Number(b.dataset.y);
@@ -81,7 +81,7 @@ function render(){
   var term = q.value.toLowerCase();
   var html = '', n = 0;
   DATA.forEach(function(p,i){
-    if(year && p.y!==year) return;
+    if(year && Number(p.y)!==year) return;
     if(term && (p.n+' '+p.d).toLowerCase().indexOf(term)===-1) return;
     n++;
     html += '<button class="card" type="button" data-i="'+i+'">'+
@@ -106,7 +106,7 @@ grid.addEventListener('click', function(e){
     '<div><b>token URI (POAP-hosted)</b> <span class="dead">'+esc(p.uri)+'</span></div>'+
     '<div><b>original image URL (POAP-hosted)</b> <span class="dead">'+esc(p.src)+'</span></div>'+
     '<div><b>image sha256</b> '+esc(p.sha||'n/a')+'</div>'+
-    '<div><a href="'+scan+'" target="_blank" rel="noopener">view token on chain</a></div></div>';
+    '<div><a href="'+esc(scan)+'" target="_blank" rel="noopener">view token on chain</a></div></div>';
   dlg.querySelector('#x').addEventListener('click', function(){ dlg.close(); });
   dlg.showModal();
 });

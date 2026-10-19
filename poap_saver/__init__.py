@@ -482,10 +482,11 @@ def gallery_html(address, rows):
             break
     else:
         raise SystemExit("gallery-template.html not found")
-    # "</" must not appear inside the inline <script> block: badge metadata
-    # is third-party text and "</script>" in it would end the element.
+    # No "<" may appear inside the inline <script> block: badge metadata is
+    # third-party text, and "</script>" ends the element while "<!--<script"
+    # changes how the browser finds its end. JSON reads \u003c back as "<".
     data = json.dumps(rows, ensure_ascii=False,
-                      separators=(",", ":")).replace("</", "<\\/")
+                      separators=(",", ":")).replace("<", "\\u003c")
     return (tpl.replace("__ADDRESS__", address)
                .replace("__COUNT__", str(len(rows)))
                .replace("__DATA__", data))
