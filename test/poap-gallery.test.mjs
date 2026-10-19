@@ -25,7 +25,7 @@ const row = (over) => ({
 
 /* The script inside a filled template, run against stand-in elements. */
 function runGallery(html) {
-    const script = /<script>([\s\S]*)<\/script>/.exec(html)[1];
+    const script = /<script>([\s\S]*)<\/script>/i.exec(html)[1];
     const el = () => ({
         innerHTML: "", textContent: "", value: "", children: [], dataset: {},
         addEventListener() {}, querySelector: () => el(), showModal() {}, close() {},
