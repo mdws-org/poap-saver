@@ -354,6 +354,15 @@
         });
     }
 
+    // A preview URL is also a link, so its blob must never carry a type the
+    // browser runs as a page (text/html, image/svg+xml) in this origin. Raster
+    // images keep their type; anything else is plain bytes.
+    function previewType(ctype) {
+        var raster = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'];
+        var base = (ctype || '').split(';')[0].trim().toLowerCase();
+        return raster.indexOf(base) >= 0 ? base : 'application/octet-stream';
+    }
+
     function extFor(ctype, url) {
         var map = { 'image/png': '.png', 'image/gif': '.gif', 'image/jpeg': '.jpg',
                     'image/webp': '.webp', 'image/svg+xml': '.svg' };
@@ -435,7 +444,7 @@
                         row.img = dir + fname;
                         row.sha = sha;
                         row.preview = URL.createObjectURL(
-                            new Blob([bytes], { type: ctype || 'image/png' }));
+                            new Blob([bytes], { type: previewType(ctype) }));
                     });
                 });
             });
@@ -776,7 +785,7 @@
                             y: meta.year || null, sha: sha, uri: null,
                             src: meta.image_url || meta.image || null,
                             preview: URL.createObjectURL(
-                                new Blob([bytes], { type: ctype || 'image/png' })),
+                                new Blob([bytes], { type: previewType(ctype) })),
                         };
                         stalePreviews.push(row.preview);
                         showPreview([row]);
