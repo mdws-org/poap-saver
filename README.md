@@ -74,22 +74,23 @@ person who archived it.
 ## The archive and its registry
 
 The whole of POAP is archived, not just the badges people saved through the
-tool: every event that existed when POAP shut down — 197,577 events, 181,554
-unique artworks, all their metadata — crawled from POAP's own hosts in its
-final days, verified byte-for-byte against the SHA-256 of every file as
-served, and published to IPFS.
+tool: every event that existed as POAP wound down, through the last drops it
+issued in September 2026 — 197,589 events, 181,566 unique artworks, all their
+metadata — crawled from POAP's own hosts in its final days, verified
+byte-for-byte against the SHA-256 of every file as served, and published to
+IPFS.
 
 [`registry/corpus/`](registry/corpus/) is the permanent map. One row per
 event: the artwork's SHA-256 as POAP served it, the artwork's IPFS CID, the
-metadata's CID, and the original URLs. `gaps.jsonl` lists the 42,423 ids in
+metadata's CID, and the original URLs. `gaps.jsonl` lists the 42,411 ids in
 the 1–240,000 space that had nothing to save — recorded with their reason
 while POAP still answered, which is the difference between an archive that is
 missing something and an id that never existed. `summary.json` carries the
 totals and two root CIDs that cover everything:
 
 ```
-all artwork (~194 GB):  bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i
-all metadata:           bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu
+all artwork (~194 GB):  bafybeiccw6agfdwyezhaossnesw2ftzsycf3d6tljgkh4qdxy547twzi5y
+all metadata:           bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe
 ```
 
 Anyone holding these registry files plus any copy of the blocks can rebuild
@@ -107,8 +108,8 @@ root CIDs above are recursive pins, and re-running resumes an interrupted
 transfer:
 
 ```
-ipfs pin add bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i   # artwork, ~194 GB
-ipfs pin add bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu   # metadata
+ipfs pin add bafybeiccw6agfdwyezhaossnesw2ftzsycf3d6tljgkh4qdxy547twzi5y   # artwork, ~194 GB
+ipfs pin add bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe   # metadata
 ```
 
 For subsets, [`scripts/pin-mirror.py`](scripts/) reads the registry and pins

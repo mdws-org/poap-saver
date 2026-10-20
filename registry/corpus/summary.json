@@ -1,13 +1,13 @@
 {
-  "artwork_bytes": 194022323785,
-  "blob_root_cid": "bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i",
+  "artwork_bytes": 194029564533,
+  "blob_root_cid": "bafybeiccw6agfdwyezhaossnesw2ftzsycf3d6tljgkh4qdxy547twzi5y",
   "cid_profile": "cid-version 1, raw leaves, 256 KiB chunks (kubo defaults for --cid-version=1)",
-  "events": 197577,
-  "gaps": 42423,
-  "meta_root_cid": "bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu",
+  "events": 197589,
+  "gaps": 42411,
+  "meta_root_cid": "bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe",
   "span": [
     1,
     240000
   ],
-  "unique_artworks": 181554
+  "unique_artworks": 181566
 }

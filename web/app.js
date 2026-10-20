@@ -20,7 +20,7 @@
        metadata at META_ROOT/<eventId>.json, artwork at ART_ROOT/<eventId>.
        Names resolve through any public gateway, and the roots are pinned, so
        this keeps answering after every HTTP host in this file is gone. */
-    var META_ROOT = 'bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu';
+    var META_ROOT = 'bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe';
     var ART_ROOT = 'Qmcub76vVUS1vY9MsAw3XgRhpe85G5JMAAMvg6nnf8FLTw';
     var GATEWAYS = ['https://vps3.mdws.me/ipfs/', 'https://ipfs.filebase.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/'];
 

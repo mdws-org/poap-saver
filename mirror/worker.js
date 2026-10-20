@@ -133,9 +133,9 @@ async function corpusFetch(env, key) {
  * cannot serve right now can usually be read from a public gateway instead.
  * Only cindex/ remains store-only - it is a lookup structure, not content. */
 const IPFS_ROOTS = {
-    blob: 'bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i',
-    meta: 'bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu',
-    thumb: 'bafybeia3q5zqbjdhzdmdny3vzoc6gddjn4tsi22p6jd2lsx3rcm362gin4',
+    blob: 'bafybeiccw6agfdwyezhaossnesw2ftzsycf3d6tljgkh4qdxy547twzi5y',
+    meta: 'bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe',
+    thumb: 'bafybeidyhc2wvzhuvvcvzvsm5cca3jdj32ev4aejaveav4bxvmeddmucke',
     anim: 'bafybeibwodt254seymig7cbemxwgj4e5lztui3ccz6ypboafyl5i2ptn4a',
 };
 /* First the gateway on vps3, a node that pins these roots and answers only for
