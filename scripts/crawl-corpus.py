@@ -207,6 +207,12 @@ def main():
     ap.add_argument("--shard", default="",
                     help="name for this worker's own log files, so several "
                          "workers can crawl disjoint ranges at once")
+    ap.add_argument("--ids", default="",
+                    help="file of event ids, one per line, to fetch instead of "
+                         "a range. Ignores the done set: a catch-up run names "
+                         "ids POAP lists but the archive lacks, some of which "
+                         "an earlier run recorded as a miss, and a later fetch "
+                         "beats an earlier miss when the registry is built")
     args = ap.parse_args()
 
     if args.status:
@@ -219,9 +225,15 @@ def main():
     mis_path = os.path.join(args.out, f"misses{suffix}.jsonl")
 
     done = load_done(args.out)
-    todo = [e for e in range(args.start, args.end + 1) if e not in done]
-    print(f"{len(done):,} events already handled, {len(todo):,} to go "
-          f"({args.start}-{args.end})", flush=True)
+    if args.ids:
+        with open(args.ids, encoding="utf-8") as f:
+            todo = sorted({int(x) for x in f.read().split()})
+        print(f"{len(done):,} events already handled, {len(todo):,} listed "
+              f"ids to fetch regardless", flush=True)
+    else:
+        todo = [e for e in range(args.start, args.end + 1) if e not in done]
+        print(f"{len(done):,} events already handled, {len(todo):,} to go "
+              f"({args.start}-{args.end})", flush=True)
     if not todo:
         return
 
