@@ -1,10 +1,11 @@
 # The POAP archive registry
 
-Every POAP event that existed when POAP shut down in August 2026: 197,577
-events, 181,554 unique artworks, and all their metadata, crawled from POAP's
-own hosts in their final days and verified byte-for-byte against the SHA-256
-of every file as served. The tokens are permanent; this is the layer they
-point at, which was not.
+Every POAP event that existed as POAP wound down in 2026, through the last
+drops it issued in September: 197,589 events, 181,566 unique artworks, and all
+their metadata, crawled from POAP's own hosts in their final days (and topped
+up on 19 October 2026) and verified byte-for-byte against the SHA-256 of every
+file as served. The tokens are permanent; this is the layer they point at,
+which was not.
 
 ## Mirror the whole archive
 
@@ -12,20 +13,22 @@ Two commands, with [kubo](https://docs.ipfs.tech/install/) installed and
 `ipfs daemon` running:
 
 ```
-ipfs pin add bafybeickz3h6wnxdwsxeoixj3pxk24fnczqeymuqh7h7xge7iaownd4b3i   # all artwork, ~194 GB
-ipfs pin add bafybeiglmxn6ta7bt76p5ed6mnmek4m4uvmftonxjqe6zemp6j73qzwwuu   # all metadata, 145 MB
+ipfs pin add bafybeiccw6agfdwyezhaossnesw2ftzsycf3d6tljgkh4qdxy547twzi5y   # all artwork, ~194 GB
+ipfs pin add bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe   # all metadata, 145 MB
 ```
 
-The earlier roots (`bafybeiedeqc3…` artwork, `bafybeia7stlx…` metadata) still
-resolve; they are simply the archive before the 7,424 events recovered from
-above id 194,000 were added. Pin the roots above.
+Earlier roots still resolve and stay pinned; each is simply the archive as it
+stood on its date. The August 2026 edition (`bafybeickz3h…` artwork,
+`bafybeiglmxn…` metadata; 197,577 events, before the September drops) and the
+first crawl (`bafybeiedeqc3…` artwork, `bafybeia7stlx…` metadata; 190,153
+events, before the 7,424 recovered from above id 194,000). Pin the roots above.
 
 Two derivative trees exist for anyone who wants the archive browsable, not
 just intact. Both regenerate from the artwork, so they matter less than the
 roots above - but a mirror that serves readers wants them:
 
 ```
-ipfs pin add bafybeia3q5zqbjdhzdmdny3vzoc6gddjn4tsi22p6jd2lsx3rcm362gin4   # 400px thumbnails, 4.4 GB
+ipfs pin add bafybeidyhc2wvzhuvvcvzvsm5cca3jdj32ev4aejaveav4bxvmeddmucke   # 400px thumbnails, 4.4 GB
 ipfs pin add bafybeibwodt254seymig7cbemxwgj4e5lztui3ccz6ypboafyl5i2ptn4a   # animation re-encodes, 47 MB
 ```
 
@@ -50,7 +53,7 @@ root:
   SHA-256 exactly as POAP served it, the artwork's CID, the metadata's CID,
   the size and content type, and the original `assets.poap.xyz` /
   `api.poap.tech` URLs. Sharded 10,000 event ids per file.
-- `gaps.jsonl` — the 42,423 ids in the 1–240,000 space that had nothing to
+- `gaps.jsonl` — the 42,411 ids in the 1–240,000 space that had nothing to
   save, each with the reason observed while POAP still answered. This is what
   lets the archive claim completeness: an id is either in the registry or in
   here, never silently absent.
