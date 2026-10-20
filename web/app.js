@@ -21,7 +21,7 @@
        Names resolve through any public gateway, and the roots are pinned, so
        this keeps answering after every HTTP host in this file is gone. */
     var META_ROOT = 'bafybeif5yj2ywl3eci7dvsvisvqybjjglgujrkvofh2i4u4wasvslktnoe';
-    var ART_ROOT = 'Qmcub76vVUS1vY9MsAw3XgRhpe85G5JMAAMvg6nnf8FLTw';
+    var ART_ROOT = 'QmVwQHPGpyvRWzEdtyP4rGq9ANnv9EZaFt79hcXdYBDkPL';
     var GATEWAYS = ['https://vps3.mdws.me/ipfs/', 'https://ipfs.filebase.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/'];
 
     /* Last tier: the complete archive out of S3-compatible object storage,
