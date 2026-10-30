@@ -202,6 +202,7 @@
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: to, data: data }, 'latest'] }),
+                signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
             }).then(function (r) {
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 return r.json();
@@ -209,7 +210,8 @@
                 if (j.error) {
                     var err = new Error(j.error.message);
                     err.data = j.error.data;
-                    err.reverted = true;
+                    // an execution revert carries hex data; a rate limit or node error does not
+                    err.reverted = typeof j.error.data === 'string' && /^0x[0-9a-fA-F]*$/.test(j.error.data);
                     throw err;
                 }
                 return j.result;

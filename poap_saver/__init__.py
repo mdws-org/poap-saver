@@ -186,8 +186,13 @@ def eth_call(to, data):
         try:
             out = _post_json(url, {"jsonrpc": "2.0", "id": 1, "method": "eth_call",
                                    "params": [{"to": to, "data": data}, "latest"]})
-            if out.get("error"):
-                raise Revert(out["error"].get("data"))
+            err = out.get("error")
+            if err:
+                data = err.get("data")
+                # an execution revert carries hex data; a rate limit or node error does not
+                if isinstance(data, str) and re.fullmatch(r"0x[0-9a-fA-F]*", data):
+                    raise Revert(data)
+                raise RuntimeError(err.get("message", err))
             return out["result"]
         except Revert:
             raise
@@ -313,19 +318,28 @@ def resolve_ens(name):
         res = _ur_call("0x9061b923" + _w(0x40) + _w(0x40 + len(a) // 2) + a + _bytes_arg(inner))
         return _bytes_at(res[2:], _at(res[2:], 0))
 
+    def why(e):
+        sel = e.data[:10] if isinstance(e, Revert) else ""
+        return {"0x77209fe8": f"{n}: not registered",
+                "0x1e9535f2": f"{n}: its resolver is not a contract",
+                "0x95c0c752": f"{n}: its resolver failed - try again later",
+                "0x7b1c461b": None}.get(sel, f"{n}: could not be resolved ({e})")
+
+    none = f"{n}: no Ethereum address is set for this name"
     try:  # addr(bytes32, 60): the ENSIP-9 Ethereum record
         b = _bytes_at(resolve("f1cb7e06" + node + _w(60)), 0)
-        if len(b) == 40:
+        if len(b) == 40 and int(b, 16):
             return "0x" + b
-    except Exception:  # noqa: BLE001 - older resolvers only answer addr(bytes32)
-        pass
+    except Exception as e:  # noqa: BLE001 - older resolvers only answer addr(bytes32)
+        if why(e):
+            raise SystemExit(why(e)) from None
     try:
         a = resolve("3b3b57de" + node)[24:64]
-        if a and int(a, 16):
-            return "0x" + a
-    except Exception:  # noqa: BLE001
-        pass
-    raise SystemExit(f"{n}: no Ethereum address is set for this name")
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit(why(e) or none) from None
+    if a and int(a, 16):
+        return "0x" + a
+    raise SystemExit(none)
 
 
 def chunked(seq, n):
