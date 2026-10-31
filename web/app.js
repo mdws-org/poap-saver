@@ -9,7 +9,6 @@
     'use strict';
 
     var POAP = '0x22c1f6050e56d2876009903609a2cc3fef83b415';
-    var ENS_REGISTRY = '0x00000000000c2e074ec69a0dfb2997ba6c7d2e1e';
     /* Read-only mirror of POAP event artwork (mirror/ in the repo). A
        fallback for when POAP's own host stops answering; the page never
        sends it anything. The same Worker also fronts the COMPLETE archive
@@ -194,21 +193,39 @@
         return new TextDecoder().decode(bytes);
     }
 
-    function resolveEns(name) {
-        if (!/^[\x00-\x7F]*$/.test(name)) {
-            return Promise.reject(new Error(
-                name + ': non-ASCII ENS names are not supported - paste the 0x address instead'));
+    /* One eth_call that keeps the revert data: ENS offchain names answer with
+       an OffchainLookup revert that the resolver needs to read. */
+    function ethCall(to, data) {
+        var urls = RPCS.eth;
+        function attempt(u) {
+            return fetch(urls[u], {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: to, data: data }, 'latest'] }),
+                signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+            }).then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            }).then(function (j) {
+                if (j.error) {
+                    var err = new Error(j.error.message);
+                    err.data = j.error.data;
+                    // an execution revert carries hex data; a rate limit or node error does not
+                    err.reverted = typeof j.error.data === 'string' && /^0x[0-9a-fA-F]*$/.test(j.error.data);
+                    throw err;
+                }
+                return j.result;
+            }).catch(function (e) {
+                if (e.reverted || u + 1 >= urls.length) throw e;
+                return attempt(u + 1);
+            });
         }
-        var node = hex(namehash(name));
-        return rpcBatch('eth', ['0x0178b8bf' + node], ENS_REGISTRY).then(function (r) {
-            var resolver = '0x' + (r[0] || '').slice(-40);
-            if (!parseInt(resolver, 16)) throw new Error(name + ': no ENS resolver set');
-            return rpcBatch('eth', ['0x3b3b57de' + node], resolver);
-        }).then(function (r) {
-            var addr = '0x' + (r[0] || '').slice(-40);
-            if (!parseInt(addr, 16)) throw new Error(name + ': resolver has no address record');
-            return addr;
-        });
+        return attempt(0);
+    }
+
+    /* ENS v1 and v2 names, through the ENS Universal Resolver (ens.js). */
+    function resolveEns(name) {
+        return window.makeEnsResolver(ethCall, keccak256).resolve(name);
     }
 
     function enumerate(chain, addr) {
@@ -840,7 +857,7 @@
     /* Test hook: lets test/zip-test.html exercise the zip writer with the
        real functions instead of a re-implementation. Harmless in production. */
     window.__poapSaver = { keccak256: keccak256, crc32: crc32, makeZip: makeZip,
-                           namehash: namehash, hex: hex };
+                           namehash: namehash, hex: hex, resolveEns: resolveEns };
 
     var qs = new URLSearchParams(location.search);
     if (qs.get('address')) {

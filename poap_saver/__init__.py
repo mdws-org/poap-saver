@@ -48,9 +48,10 @@ MIRROR = "https://poap-mirror.bemeadows.workers.dev"
 SEL_BALANCE = "0x70a08231"
 SEL_TOKEN_OF_OWNER = "0x2f745c59"
 SEL_TOKEN_URI = "0xc87b56dd"
-SEL_RESOLVER = "0x0178b8bf"   # ENS registry resolver(bytes32)
-SEL_ADDR = "0x3b3b57de"       # resolver addr(bytes32)
-ENS_REGISTRY = "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e"
+# ENS Universal Resolver: walks the ENSv2 registry tree (live 2026-10-27) and
+# falls back to v1, so v1, migrated and native v2 names resolve the same way.
+ENS_UNIVERSAL_RESOLVER = "0xeeeeeeee14d718c2b47d9923deab1335e144eeee"
+ENS_GATEWAY = "https://ccip-v3.ens.xyz"
 
 
 def log(msg):
@@ -170,17 +171,175 @@ def decode_string(h):
     return b[off + 32:off + 32 + ln].decode("utf-8", "replace")
 
 
+class Revert(Exception):
+    """An eth_call that reverted, with its revert data."""
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.data = data or ""
+
+
+def eth_call(to, data):
+    """One eth_call that keeps revert data; ENS offchain names need it."""
+    last_err = None
+    for url in RPCS["eth"]:
+        try:
+            out = _post_json(url, {"jsonrpc": "2.0", "id": 1, "method": "eth_call",
+                                   "params": [{"to": to, "data": data}, "latest"]})
+            err = out.get("error")
+            if err:
+                data = err.get("data")
+                # an execution revert carries hex data; a rate limit or node error does not
+                if isinstance(data, str) and re.fullmatch(r"0x[0-9a-fA-F]*", data):
+                    raise Revert(data)
+                raise RuntimeError(err.get("message", err))
+            return out["result"]
+        except Revert:
+            raise
+        except Exception as e:  # noqa: BLE001 - try the next endpoint
+            last_err = e
+    raise RuntimeError(f"all RPC endpoints failed for eth: {last_err}")
+
+
+def _post_json(url, body=None):
+    p = urllib.parse.urlparse(url)
+    c = http.client.HTTPSConnection(p.netloc, timeout=30)
+    path = (p.path or "/") + (("?" + p.query) if p.query else "")
+    if body is None:
+        c.request("GET", path, headers={"user-agent": UA, "accept": "application/json"})
+    else:
+        c.request("POST", path, body=json.dumps(body),
+                  headers={"content-type": "application/json", "user-agent": UA})
+    r = c.getresponse()
+    raw = r.read()
+    c.close()
+    if r.status != 200:
+        raise RuntimeError(f"HTTP {r.status} from {p.netloc}")
+    return json.loads(raw)
+
+
+def _w(n):
+    return format(n, "064x")
+
+
+def _bytes_arg(h):
+    return _w(len(h) // 2) + h + "0" * ((64 - len(h) % 64) % 64)
+
+
+def _at(h, off):
+    return int(h[off * 2:off * 2 + 64], 16)
+
+
+def _bytes_at(h, off):
+    ln = _at(h, off)
+    return h[off * 2 + 64:off * 2 + 64 + ln * 2]
+
+
+def _gateway(url, sender, data):
+    """One EIP-3668 request: GET when the URL carries {data}, POST otherwise."""
+    if "{data}" in url:
+        out = _post_json(url.replace("{sender}", sender.lower()).replace("{data}", "0x" + data))
+    else:
+        out = _post_json(url.replace("{sender}", sender.lower()),
+                         {"data": "0x" + data, "sender": sender.lower()})
+    if not isinstance(out.get("data"), str):
+        raise RuntimeError("gateway gave no data")
+    return out["data"].removeprefix("0x")
+
+
+def _local_batch(q):
+    """ENSIP-21 batch gateway: query((address,string[],bytes)[]) -> (bool[], bytes[])."""
+    h = q[8:]
+    arr = _at(h, 0)
+    base = arr + 32
+    results = []
+    for i in range(_at(h, arr)):
+        t = base + _at(h, base + 32 * i)
+        sender = "0x" + h[t * 2 + 24:t * 2 + 64]
+        us = t + _at(h, t + 32)
+        urls = [bytes.fromhex(_bytes_at(h, us + 32 + _at(h, us + 32 + 32 * k))).decode()
+                for k in range(_at(h, us))]
+        data = _bytes_at(h, t + _at(h, t + 64))
+        for u in urls:
+            try:
+                results.append((True, _gateway(u, sender, data)))
+                break
+            except Exception as e:  # noqa: BLE001 - next URL
+                err = str(e)
+        else:
+            results.append((False, "08c379a0" + _w(32) + _bytes_arg(err.encode().hex())))
+    if not any(ok for ok, _ in results):
+        raise RuntimeError("every gateway failed")
+    flags = _w(len(results)) + "".join(_w(0 if ok else 1) for ok, _ in results)
+    tails = [_bytes_arg(d) for _, d in results]
+    heads, off = [], 32 * len(results)
+    for t in tails:
+        heads.append(_w(off))
+        off += len(t) // 2
+    arr_bytes = _w(len(results)) + "".join(heads) + "".join(tails)
+    return _w(0x40) + _w(0x40 + len(flags) // 2) + flags + arr_bytes
+
+
+def _ur_call(data):
+    """eth_call to the Universal Resolver, answering OffchainLookup (EIP-3668)."""
+    for _ in range(4):
+        try:
+            return eth_call(ENS_UNIVERSAL_RESOLVER, data)
+        except Revert as rv:
+            if not rv.data.startswith("0x556f1830"):
+                raise
+            h = rv.data[10:]
+            sender = "0x" + h[24:64]
+            if sender.lower() != ENS_UNIVERSAL_RESOLVER:
+                raise RuntimeError("offchain lookup from an unexpected contract") from None
+            call_data = _bytes_at(h, _at(h, 64))
+            callback = h[192:200]
+            extra = _bytes_at(h, _at(h, 128))
+            try:
+                if call_data[:8] != "a780bab6":
+                    raise RuntimeError("not a batch")
+                resp = _local_batch(call_data)
+            except Exception:  # noqa: BLE001 - fall back to ENS Labs' gateway
+                resp = _gateway(ENS_GATEWAY, sender, call_data)
+            a = _bytes_arg(resp)
+            data = "0x" + callback + _w(0x40) + _w(0x40 + len(a) // 2) + a + _bytes_arg(extra)
+    raise RuntimeError("too many offchain lookups")
+
+
 def resolve_ens(name):
-    node = namehash(name).hex()
-    res = rpc_batch("eth", [SEL_RESOLVER + node], to=ENS_REGISTRY)[0]
-    resolver = "0x" + (res or "0x" + "0" * 64)[-40:]
-    if int(resolver, 16) == 0:
-        raise SystemExit(f"{name}: no ENS resolver set")
-    addr = rpc_batch("eth", [SEL_ADDR + node], to=resolver)[0]
-    address = "0x" + (addr or "0x" + "0" * 64)[-40:]
-    if int(address, 16) == 0:
-        raise SystemExit(f"{name}: resolver has no address record")
-    return address
+    n = name.strip().lower()
+    if not re.fullmatch(r"([a-z0-9_-]+\.)+[a-z0-9-]+", n):
+        raise SystemExit(f"{name}: only plain ASCII ENS names are supported - pass the 0x address instead")
+    node = namehash(n).hex()
+    dns = "".join(format(len(lb), "02x") + lb.encode().hex() for lb in n.split(".")) + "00"
+
+    def resolve(inner):
+        a = _bytes_arg(dns)
+        res = _ur_call("0x9061b923" + _w(0x40) + _w(0x40 + len(a) // 2) + a + _bytes_arg(inner))
+        return _bytes_at(res[2:], _at(res[2:], 0))
+
+    def why(e):
+        sel = e.data[:10] if isinstance(e, Revert) else ""
+        return {"0x77209fe8": f"{n}: not registered",
+                "0x1e9535f2": f"{n}: its resolver is not a contract",
+                "0x95c0c752": f"{n}: its resolver failed - try again later",
+                "0x7b1c461b": None}.get(sel, f"{n}: could not be resolved ({e})")
+
+    none = f"{n}: no Ethereum address is set for this name"
+    try:  # addr(bytes32, 60): the ENSIP-9 Ethereum record
+        b = _bytes_at(resolve("f1cb7e06" + node + _w(60)), 0)
+        if len(b) == 40 and int(b, 16):
+            return "0x" + b
+    except Exception as e:  # noqa: BLE001 - older resolvers only answer addr(bytes32)
+        if why(e):
+            raise SystemExit(why(e)) from None
+    try:
+        a = resolve("3b3b57de" + node)[24:64]
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit(why(e) or none) from None
+    if a and int(a, 16):
+        return "0x" + a
+    raise SystemExit(none)
 
 
 def chunked(seq, n):
