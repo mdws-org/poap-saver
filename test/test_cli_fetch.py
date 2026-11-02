@@ -75,7 +75,7 @@ class Retries(unittest.TestCase):
     def test_a_refused_url_is_not_retried(self):
         poap_saver._CONNS.clear()
         with mock.patch.object(poap_saver.time, "sleep") as slept:
-            with self.assertRaises(Exception):
+            with self.assertRaises(poap_saver.Refused):
                 poap_saver.fetch("http://127.0.0.1:9/x", tries=3)
         slept.assert_not_called()
 
@@ -115,7 +115,7 @@ class Redirects(unittest.TestCase):
         with mock.patch.object(poap_saver, "_conn", return_value=conn), \
                 mock.patch.object(poap_saver, "_public_addrs", return_value=["203.0.113.7"], create=True), \
                 mock.patch.object(poap_saver.time, "sleep"):
-            with self.assertRaises(Exception):
+            with self.assertRaises(poap_saver.Refused):
                 poap_saver.fetch("https://api.poap.tech/metadata/1", tries=1)
 
     def test_an_https_redirect_to_https_still_works(self):
